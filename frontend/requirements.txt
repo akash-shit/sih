@@ -1,0 +1,26 @@
+# Core geospatial
+rasterio==1.5.1
+mgrs==1.5.4
+
+# Vector search
+faiss-cpu==1.15.0
+
+# Embedding runtime is configured for a separately staged local RemoteCLIP
+# OpenCLIP-format checkpoint; application startup never downloads weights.
+# once its weights are staged locally -- this package stays the same)
+torch==2.13.0
+torchvision==0.28.0
+open_clip_torch==3.3.0
+
+# Discovery / clustering
+scikit-learn==1.8.0
+hdbscan==0.8.44
+
+# Array / image plumbing
+numpy==2.4.4
+pillow==12.1.1
+
+# HTTP integration layer
+fastapi==0.116.1
+python-multipart==0.0.20
+uvicorn[standard]==0.35.0

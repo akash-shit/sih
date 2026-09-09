@@ -1,0 +1,340 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 216 33% 6%;
+    --foreground: 210 40% 98%;
+  }
+
+  * {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  body {
+    background-color: #0A0E14;
+    color: #F0F6FC;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom defense-grade dark scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0A0E14;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 212, 255, 0.4);
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    background-color: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-panel-hover {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .glass-panel-hover:hover {
+    border-color: rgba(0, 212, 255, 0.25);
+    background-color: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 20px -4px rgba(0, 212, 255, 0.15);
+  }
+
+  .hud-grid-pattern {
+    background-size: 32px 32px;
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  }
+
+  .hud-dots-pattern {
+    background-image: radial-gradient(rgba(0, 212, 255, 0.15) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .mission-orbit {
+    position: absolute;
+    border: 1px solid rgba(112, 200, 255, 0.18);
+    border-radius: 9999px;
+    animation: orbit 26s linear infinite;
+    pointer-events: none;
+  }
+
+  .orbit-1 {
+    width: 42rem;
+    height: 42rem;
+    right: 10%;
+    top: 10%;
+  }
+
+  .orbit-2 {
+    width: 30rem;
+    height: 30rem;
+    right: 18%;
+    top: 18%;
+    animation-duration: 32s;
+  }
+
+  .orbit-3 {
+    width: 18rem;
+    height: 18rem;
+    right: 27%;
+    top: 28%;
+    animation-duration: 24s;
+  }
+
+  .planet-earth {
+    position: absolute;
+    right: -12%;
+    bottom: -8%;
+    width: 74vw;
+    max-width: 1000px;
+    aspect-ratio: 1.8;
+    border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+    background: radial-gradient(circle at 32% 30%, rgba(255, 248, 220, 0.85), rgba(184, 135, 70, 0.75) 28%, rgba(60, 110, 148, 0.84) 54%, rgba(11, 22, 30, 0.96) 100%);
+    box-shadow: inset 0 0 50px rgba(255,255,255,0.08), inset -30px -10px 60px rgba(0,0,0,0.4);
+    opacity: 0.78;
+    transform: rotate(-14deg);
+    animation: slow-rotate 60s linear infinite;
+  }
+
+  .satellite-sweep {
+    position: absolute;
+    right: 16%;
+    top: 18%;
+    width: 18rem;
+    height: 8rem;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 9999px;
+    transform: rotate(18deg);
+    background: linear-gradient(90deg, transparent 0%, rgba(125,211,252,0.16) 48%, transparent 100%);
+    animation: sweep 9s ease-in-out infinite;
+  }
+
+  .pulse-dot {
+    position: absolute;
+    display: block;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 9999px;
+    background: rgba(34,211,238,0.9);
+    box-shadow: 0 0 18px rgba(34,211,238,0.8);
+    animation: pulse 3.4s ease-in-out infinite;
+  }
+
+  .change-candidate-grid > * {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 620px;
+  }
+
+  .space-scene {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    isolation: isolate;
+    background: #02050b;
+  }
+
+  .signin-glass {
+    background: linear-gradient(135deg, rgba(10, 25, 39, 0.72), rgba(7, 17, 29, 0.54)) !important;
+    backdrop-filter: blur(32px) saturate(130%);
+    -webkit-backdrop-filter: blur(32px) saturate(130%);
+    border-color: rgba(156, 231, 255, 0.18) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 24px 80px rgba(0, 0, 0, 0.42), 0 0 38px rgba(0, 188, 255, 0.1);
+  }
+
+  .space-scene::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: linear-gradient(90deg, rgba(2, 5, 11, 0.8) 0%, rgba(2, 5, 11, 0.18) 54%, rgba(2, 5, 11, 0.56) 100%), linear-gradient(0deg, rgba(2, 5, 11, 0.66), transparent 48%);
+  }
+
+  .space-stars,
+  .space-nebula,
+  .space-earth-image,
+  .space-atmosphere,
+  .space-orbit-ring {
+    position: absolute;
+  }
+
+  .space-stars {
+    inset: -8%;
+    opacity: 0.8;
+    background-image: radial-gradient(circle, rgba(218, 246, 255, 0.9) 0 1px, transparent 1.5px), radial-gradient(circle, rgba(95, 211, 255, 0.65) 0 1px, transparent 1.4px);
+    background-size: 127px 113px, 211px 179px;
+    animation: star-drift 42s linear infinite;
+  }
+
+  .space-stars-secondary {
+    opacity: 0.3;
+    transform: scale(1.15);
+    animation-duration: 68s;
+    animation-direction: reverse;
+  }
+
+  .space-nebula {
+    width: 70vw;
+    height: 55vh;
+    right: -8vw;
+    top: -8vh;
+    background: radial-gradient(ellipse, rgba(42, 116, 190, 0.22), transparent 64%), radial-gradient(ellipse at 70% 30%, rgba(117, 78, 182, 0.13), transparent 52%);
+    filter: blur(24px);
+    opacity: 0.7;
+  }
+
+  .space-earth-image {
+    z-index: 2;
+    right: -8%;
+    bottom: -15%;
+    width: 82vw;
+    height: 68vh;
+    background-image: url('https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?auto=format&fit=crop&w=2200&q=85');
+    background-size: cover;
+    background-position: center top;
+    border-radius: 50% 50% 0 0 / 28% 28% 0 0;
+    box-shadow: 0 -20px 80px rgba(48, 164, 255, 0.22), inset 50px 20px 100px rgba(109, 196, 255, 0.1), inset -90px -20px 120px rgba(0, 0, 0, 0.7);
+    transform: rotate(-5deg);
+    animation: earth-float 18s ease-in-out infinite;
+  }
+
+  .space-atmosphere {
+    z-index: 3;
+    right: -10%;
+    bottom: 8%;
+    width: 78vw;
+    height: 42vh;
+    border-radius: 50%;
+    box-shadow: 0 -8px 34px rgba(74, 189, 255, 0.38), inset 0 8px 28px rgba(36, 143, 238, 0.25);
+    transform: rotate(-5deg);
+  }
+
+  .space-orbit-ring {
+    z-index: 4;
+    right: 12%;
+    top: 15%;
+    width: 46rem;
+    height: 18rem;
+    border: 1px solid rgba(127, 218, 255, 0.22);
+    border-radius: 50%;
+    transform: rotate(-18deg);
+    animation: orbit-ring 30s linear infinite;
+  }
+
+  .space-orbit-ring-two {
+    right: 18%;
+    top: 25%;
+    width: 32rem;
+    height: 12rem;
+    opacity: 0.45;
+    animation-duration: 44s;
+    animation-direction: reverse;
+  }
+
+  .space-satellite {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    color: #c8f6ff;
+    background: rgba(10, 43, 68, 0.9);
+    border: 1px solid rgba(147, 232, 255, 0.75);
+    border-radius: 50%;
+    box-shadow: 0 0 8px #61ddff, 0 0 28px rgba(0, 212, 255, 0.8), 20px 0 26px rgba(94, 211, 255, 0.18);
+    animation: satellite-spin 5s linear infinite;
+  }
+
+  .dot-1 { right: 26%; top: 35%; }
+  .dot-2 { right: 40%; top: 18%; animation-delay: 0.7s; }
+  .dot-3 { right: 52%; top: 48%; animation-delay: 1.4s; }
+
+  .compare-tool {
+    @apply inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[10px] font-mono text-text-secondary transition-colors hover:bg-white/[0.08] hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .compare-tool-active {
+    @apply border-aurora-500/40 bg-aurora-500/10 text-aurora-300;
+  }
+}
+
+@keyframes orbit {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.04); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes slow-rotate {
+  0% { transform: rotate(-14deg) translateX(0); }
+  50% { transform: rotate(-8deg) translateX(-12px); }
+  100% { transform: rotate(-14deg) translateX(0); }
+}
+
+@keyframes sweep {
+  0% { opacity: 0.15; transform: translateX(-20px) rotate(18deg); }
+  50% { opacity: 0.5; transform: translateX(30px) rotate(18deg); }
+  100% { opacity: 0.15; transform: translateX(-20px) rotate(18deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.55; }
+  50% { transform: scale(1.4); opacity: 1; }
+}
+
+@keyframes star-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50px, 30px, 0); }
+}
+
+@keyframes earth-float {
+  0%, 100% { transform: rotate(-5deg) translate3d(0, 0, 0); }
+  50% { transform: rotate(-4deg) translate3d(-10px, -6px, 0); }
+}
+
+@keyframes orbit-ring {
+  from { transform: rotate(-18deg) rotate(0deg); }
+  to { transform: rotate(-18deg) rotate(360deg); }
+}
+
+@keyframes satellite-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mission-orbit,
+  .planet-earth,
+  .satellite-sweep,
+  .pulse-dot {
+    animation: none !important;
+  }
+
+  .space-stars,
+  .space-earth-image,
+  .space-orbit-ring,
+  .space-satellite {
+    animation: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .change-candidate-grid {
+    content-visibility: visible;
+  }
+}
