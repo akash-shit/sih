@@ -9,6 +9,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     SATSEARCH_CLIP_DEVICE=cpu \
+    CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 \
     REMOTECLIP_CHECKPOINT_PATH=/app/models/RemoteCLIP-ViT-B-32.pt
 WORKDIR /app
 RUN apt-get update \

@@ -6,7 +6,7 @@ This project combines:
 - a Python ingestion + detection pipeline under `app/`
 - a FastAPI backend under `backend/`
 - a React + Vite frontend under `frontend/`
-- local data storage in `data/`
+- persistent local data and model storage in `data/` and `models/`
 
 It is designed to work fully offline once the RemoteCLIP checkpoint is staged locally.
 
@@ -101,6 +101,9 @@ pip install -r requirements.txt
 
 Stage the official OpenCLIP-format `RemoteCLIP-ViT-B-32.pt` checkpoint at `models/RemoteCLIP-ViT-B-32.pt`, or set `REMOTECLIP_CHECKPOINT_PATH` to an existing local copy. The application fails clearly when it is absent and never downloads model weights at runtime.
 
+The application creates the following directories when it starts if they do not
+already exist: `data/raw`, `data/tiles`, `data/index`, and `models`.
+
 ## Quick start
 
 ### 1. Ingest a scene
@@ -133,6 +136,11 @@ python -m app.cli search-text "newly built structures near a river"
 ```bash
 python -m app.cli stats
 ```
+
+Other available CLI commands are `reingest`, `cluster`, `validate-remoteclip`,
+`migrate-remoteclip`, `diagnose-source`, `add-aoi`, `inspect-zip`, `list-aois`,
+`calibrate`, and `eval-report`. Run `python -m app.cli --help` for the complete
+argument list.
 
 ## AOI onboarding with real data
 
@@ -173,16 +181,41 @@ npm install
 npm run dev
 ```
 
-The frontend expects the backend on `http://localhost:8000` and typically uses `VITE_API_BASE_URL=http://localhost:8000`.
+The frontend defaults to `http://localhost:8000` through `VITE_API_BASE_URL`.
+Set that variable before `npm run build` or `npm run dev` when the backend is
+running elsewhere. The Vite development server listens on port `5173` and is
+configured to accept connections from the local network.
 
-To build and serve the frontend from the backend, run:
+To build the frontend for FastAPI to serve from `/`, run:
 
 ```bash
 cd frontend
 npm run build
 ```
 
-Then the FastAPI app can expose the built frontend at `/`.
+Then restart FastAPI. When `frontend/dist` exists, the backend serves the built
+frontend at `/` and generated imagery at `/generated/`.
+
+## Docker
+
+The image builds the frontend first, then runs the FastAPI backend and serves the
+compiled UI from the same container. There is no separate frontend service.
+
+Before starting the container, place the checkpoint at
+`models/RemoteCLIP-ViT-B-32.pt`. The Compose file mounts `data/` read-write so
+the SQLite catalog, generated imagery, tiles, and FAISS index persist on the
+host, and mounts `models/` read-only.
+
+```bash
+docker compose build
+docker compose up
+```
+
+Open `http://localhost:8000`. To run in the background, use
+`docker compose up -d`; stop it with `docker compose down`. The API remains
+available under the same origin, including `/docs`, `/stats`, and the frontend
+routes. To use another checkpoint location or CORS policy, override
+`REMOTECLIP_CHECKPOINT_PATH` or `CORS_ALLOWED_ORIGINS` in Compose.
 
 ## Detailed project workflow
 

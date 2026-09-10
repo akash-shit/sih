@@ -2,6 +2,12 @@
 
 This document explains how the Satellite Intelligence system works end to end, from raw satellite imagery to change candidates, semantic search, and review queue operations.
 
+The current runtime has three code layers: the `app/` Python pipeline, the
+`backend/` FastAPI integration layer, and the `frontend/` React/Vite client.
+For production-style local use, the frontend is compiled into `frontend/dist`
+and served by FastAPI from the same process. Docker packages those three layers
+into one CPU container; `data/` and `models/` remain external mounted storage.
+
 ## 1. High-level system flow
 
 ```text
@@ -275,9 +281,24 @@ It wraps the logic for:
 
 This keeps the business logic in `app/` while making the API a thin integration layer.
 
+The implemented API groups are:
+- `/stats` for catalog and processing counts
+- `/aois` and `/aois/{aoi_id}/timeline` for AOI browsing
+- `/search/text` and `/search/image` for semantic retrieval
+- `/tiles/...` and `/vectors/...` for tile details, similarity, and comparison
+- `/changes/...` and `/review/...` for candidates, evidence, decisions, and audit history
+- `/clusters/...` for discovery results
+- `/aois/onboard` for background AOI ingestion jobs
+- `/generated/...` for generated thumbnails, mosaics, and difference images
+
+Interactive API documentation is available at `/docs` when the backend is running.
+
 ## 14. Frontend flow
 
 The frontend in `frontend/` is a React + Vite app that connects to the backend.
+During development, run Vite on port `5173` and point `VITE_API_BASE_URL` at the
+FastAPI server. For a packaged run, `npm run build` writes `frontend/dist` and
+FastAPI serves that directory at `/`.
 
 Typical UI actions include:
 - choose or inspect AOIs
@@ -304,7 +325,23 @@ python -m app.cli stats
 
 This process creates a living record of indexed scenes, feature vectors, change candidates, and analyst decisions.
 
-## 16. Design principles
+## 16. Container runtime
+
+`Dockerfile` uses a two-stage build:
+1. Node 22 installs the locked frontend dependencies and creates the Vite build.
+2. Python 3.12 installs the geospatial/ML/API dependencies, copies the pipeline
+        and backend, and serves the compiled frontend with Uvicorn on port `8000`.
+
+`docker-compose.yml` runs that image as the `backend` service. It mounts:
+- `./data:/app/data` read-write for the SQLite catalog, raw scenes, tiles,
+  generated images, and FAISS assets
+- `./models:/app/models:ro` for the local RemoteCLIP checkpoint
+
+The container sets `SATSEARCH_CLIP_DEVICE=cpu` and does not download model
+weights. Start it with `docker compose up --build` and open `http://localhost:8000`.
+The development frontend remains available separately at `http://localhost:5173`.
+
+## 17. Design principles
 
 The project is intentionally built around a few key principles:
 
@@ -314,7 +351,7 @@ The project is intentionally built around a few key principles:
 - explainable detection: hybrid scoring combines image and spectral evidence
 - analyst-in-the-loop: humans confirm or reject candidates and affect ranking
 
-## 17. Summary
+## 18. Summary
 
 The project is a complete local-first pipeline for satellite change analysis: it ingests imagery, extracts geospatial features, embeds each tile with CLIP, detects meaningful change over time, suppresses false positives, clusters similar patterns, and exposes everything through a searchable review workflow.
 
