@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS tiles (
     valid_pixel_fraction REAL,
     haze_score REAL,
     cluster_id INTEGER,                 -- filled in by Stage 16 discovery
+    velocity_trend TEXT,
+    latest_velocity REAL,
+    land_cover TEXT,
     processing_version TEXT NOT NULL,
     FOREIGN KEY (scene_path) REFERENCES scenes(scene_path)
 );
@@ -82,6 +85,17 @@ CREATE TABLE IF NOT EXISTS change_candidates (
     change_centroid_x REAL,
     change_centroid_y REAL,
     narrative TEXT,
+    sar_score REAL,
+    fused_score REAL,
+    sar_only INTEGER DEFAULT 0,
+    modality TEXT,
+    land_cover TEXT,
+    priority_score REAL,
+    priority_reasons TEXT,
+    predicted_confirm_prob REAL,
+    heatmap_spectral TEXT,
+    heatmap_attention TEXT,
+    llm_narrative TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_tile ON change_candidates(tile_id);
@@ -137,12 +151,26 @@ def init_db():
         _ensure_column(conn, "scenes", "source_metadata", "TEXT")
         _ensure_column(conn, "tiles", "aoi_id", "INTEGER")
         _ensure_column(conn, "tiles", "haze_score", "REAL")
+        _ensure_column(conn, "tiles", "velocity_trend", "TEXT")
+        _ensure_column(conn, "tiles", "latest_velocity", "REAL")
+        _ensure_column(conn, "tiles", "land_cover", "TEXT")
         _ensure_column(conn, "change_candidates", "changed_fraction", "REAL")
         _ensure_column(conn, "change_candidates", "pixel_diff_score", "REAL")
         _ensure_column(conn, "change_candidates", "change_region", "TEXT")
         _ensure_column(conn, "change_candidates", "change_centroid_x", "REAL")
         _ensure_column(conn, "change_candidates", "change_centroid_y", "REAL")
         _ensure_column(conn, "change_candidates", "narrative", "TEXT")
+        _ensure_column(conn, "change_candidates", "sar_score", "REAL")
+        _ensure_column(conn, "change_candidates", "fused_score", "REAL")
+        _ensure_column(conn, "change_candidates", "sar_only", "INTEGER")
+        _ensure_column(conn, "change_candidates", "modality", "TEXT")
+        _ensure_column(conn, "change_candidates", "land_cover", "TEXT")
+        _ensure_column(conn, "change_candidates", "priority_score", "REAL")
+        _ensure_column(conn, "change_candidates", "priority_reasons", "TEXT")
+        _ensure_column(conn, "change_candidates", "predicted_confirm_prob", "REAL")
+        _ensure_column(conn, "change_candidates", "heatmap_spectral", "TEXT")
+        _ensure_column(conn, "change_candidates", "heatmap_attention", "TEXT")
+        _ensure_column(conn, "change_candidates", "llm_narrative", "TEXT")
         # These indexes reference columns that may have just been added
         # by the migration above, so they can only be created AFTER it --
         # unlike the rest of SCHEMA, they can't live in the initial

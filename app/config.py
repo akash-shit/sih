@@ -70,3 +70,32 @@ DEFAULT_CHANGE_THRESHOLD = 0.22
 # embedding drift (Stage 13 false-alarm suppression).
 MAX_CLOUD_FRACTION = 0.15
 MIN_VALID_PIXEL_FRACTION = 0.80
+
+# ---- Temporal signature / velocity -------------------------------------
+VELOCITY_STABLE_THRESHOLD = 0.01
+VELOCITY_ACCEL_SLOPE_THRESHOLD = 0.0015
+VELOCITY_ACCEL_RATIO = 1.25
+
+# Storyline candidate interpretation thresholds
+STORYLINE_ONSET_THRESHOLD = 0.02
+STORYLINE_ACTIVE_THRESHOLD = 0.05
+STORYLINE_MAJOR_THRESHOLD = 0.09
+STORYLINE_STABILIZING_THRESHOLD = 0.03
+
+# ---- SAR fusion ---------------------------------------------------------
+SAR_VV_WEIGHT = 0.45
+SAR_VH_WEIGHT = 0.35
+SAR_DIFF_WEIGHT = 0.20
+SAR_VV_DELTA_SCALE = 3.5
+SAR_VH_DELTA_SCALE = 3.5
+SAR_DIFF_SCALE = 4.5
+SAR_MIN_VALID_PIXELS = 0.50
+SAR_MIN_CHANGE_SCORE = 0.18
+SAR_ONLY_WEIGHT = 0.60
+SAR_OPTICAL_MATCH_TOLERANCE_DAYS = 30
+SAR_APPLY_SPECKLE_FILTER = False
+
+# ---- Land-cover heuristic ----------------------------------------------
+LANDCOVER_WATER_NDWI = 0.10
+LANDCOVER_DENSE_VEG_NDVI = 0.55
+LANDCOVER_SPARSE_VEG_NDVI = 0.28
