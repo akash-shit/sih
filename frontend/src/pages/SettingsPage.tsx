@@ -58,7 +58,7 @@ export const SettingsPage: React.FC = () => {
           <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-1">
             <span className="text-[10px] uppercase text-text-muted">Processing Engine Version</span>
             <div className="text-text-primary font-semibold">
-              {stats?.processing_version || 'v0.1-prototype'}
+              {stats?.processing_version || 'v0.2-innovations'}
             </div>
             <p className="text-[10px] text-text-muted">Multi-spectral 19-stage pipeline build</p>
           </div>

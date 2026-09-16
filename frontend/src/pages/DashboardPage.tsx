@@ -196,7 +196,7 @@ export const DashboardPage: React.FC = () => {
             <div>
               <span className="text-[10px] uppercase text-text-muted block">Processing Engine</span>
               <span className="text-text-primary font-semibold">
-                {stats?.processing_version || 'v0.1-prototype'}
+                {stats?.processing_version || 'v0.2-innovations'}
               </span>
             </div>
             <div>

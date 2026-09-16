@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 """
 
-PROCESSING_VERSION = "v0.1-prototype"
+PROCESSING_VERSION = "v0.2-innovations"
 
 
 @contextmanager
