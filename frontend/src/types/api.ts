@@ -246,3 +246,35 @@ export interface TextSearchRequest {
   date_to?: string;
   k?: number;
 }
+
+export interface VelocityPoint {
+  date_pair: { before: string; after: string };
+  velocity: number;
+  source: string;
+}
+
+export interface TemporalSignature {
+  series: VelocityPoint[];
+  velocities: number[];
+  score_sources: string[];
+  acceleration: number | null;
+  trend: string;
+  latest_velocity: number | null;
+}
+
+export interface VelocityTile extends TemporalSignature {
+  tile_id: string;
+}
+
+export interface StorylineProfile {
+  short: number | null;
+  seasonal: number | null;
+  long: number | null;
+  score_sources: Record<string, string | null>;
+}
+
+export interface Storyline {
+  profile: StorylineProfile;
+  velocities: number[];
+  stage: string;
+}

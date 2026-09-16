@@ -14,6 +14,7 @@ import { ClusterDetailPage } from '@/pages/ClusterDetailPage';
 import { OnboardPage } from '@/pages/OnboardPage';
 import { AuditLogPage } from '@/pages/AuditLogPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { VelocityPage } from '@/pages/VelocityPage';
 
 export const router = createBrowserRouter([
   {
@@ -55,6 +56,10 @@ export const router = createBrowserRouter([
       {
         path: 'changes',
         element: <ChangesPage />,
+      },
+      {
+        path: 'velocity',
+        element: <VelocityPage />,
       },
       {
         path: 'changes/:vectorId',

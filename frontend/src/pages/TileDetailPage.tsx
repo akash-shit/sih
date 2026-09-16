@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTile, useSimilarTiles } from '@/hooks/useTiles';
+import { useStoryline, useTemporalSignature } from '@/hooks/useTemporalSignature';
 import { GlassPanel } from '@/components/common/GlassPanel';
 import { TileThumbnail } from '@/components/common/TileThumbnail';
 import { SkeletonCard } from '@/components/common/SkeletonCard';
@@ -10,6 +11,8 @@ import { ArrowLeft, Compass, Cpu } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import { ImageZoomModal } from '@/components/common/ImageZoomModal';
+import { TemporalSignatureChart } from '@/components/common/TemporalSignatureChart';
+import { MiniBar } from '@/components/common/MiniBar';
 
 export const TileDetailPage: React.FC = () => {
   const { tileId } = useParams<{ tileId: string }>();
@@ -18,6 +21,8 @@ export const TileDetailPage: React.FC = () => {
 
   const { data: tile, isLoading: tileLoading, isError: tileError } = useTile(tileId);
   const { data: similarTiles, isLoading: similarLoading } = useSimilarTiles(tileId, 12);
+  const { data: temporal } = useTemporalSignature(tileId);
+  const { data: storyline } = useStoryline(tileId);
 
   return (
     <div className="space-y-8">
@@ -98,6 +103,8 @@ export const TileDetailPage: React.FC = () => {
 
           {/* Right Column: Multi-Spectral Telemetry & Physical Features */}
           <div className="lg:col-span-2 space-y-6">
+            {temporal && <GlassPanel className="p-6"><TemporalSignatureChart series={temporal.series} trend={temporal.trend} /></GlassPanel>}
+            {storyline && <GlassPanel className="p-6 space-y-4"><div className="flex items-center justify-between"><h3 className="text-xs font-mono uppercase tracking-wider text-text-secondary">Storyline</h3><span className="px-2 py-0.5 rounded border border-aurora-500/30 bg-aurora-500/10 text-aurora-300 text-[10px] font-mono uppercase">{storyline.stage.replace('_', ' ')}</span></div><div className="grid grid-cols-3 gap-3"><MiniBar label="Short" value={storyline.profile.short} color="cyan" /><MiniBar label="Seasonal" value={storyline.profile.seasonal} color="amber" /><MiniBar label="Long" value={storyline.profile.long} color="emerald" /></div><TemporalSignatureChart values={storyline.velocities} trend={temporal?.trend} className="h-32 w-full" /></GlassPanel>}
             <GlassPanel className="p-6 space-y-4">
               <h3 className="text-xs font-mono uppercase tracking-wider text-text-secondary flex items-center gap-2">
                 <Compass size={14} className="text-aurora-400" />

@@ -19,6 +19,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from app.config import TILE_SIZE_PX
+from app.change import storyline, temporal_signature
 from app.discovery import clustering
 from app.geospatial import catalog_db as db
 from app.index import search as index_search
@@ -602,6 +603,50 @@ def tile(tile_id: str, request: Request):
 	if row is None:
 		raise HTTPException(404, "Tile not found")
 	return tile_public(row, request)
+
+
+@app.get("/changes/velocity")
+def change_velocity():
+	results = temporal_signature.velocity_for_all_tiles()
+	trend_order = {"accelerating": 0, "steady_change": 1, "decelerating": 2, "stable": 3}
+	return [
+		{
+			"tile_id": tile_id,
+			"trend": result.trend,
+			"latest_velocity": result.latest_velocity,
+			"acceleration": result.acceleration,
+			"velocities": result.series,
+		}
+		for tile_id, result in sorted(results.items(), key=lambda item: trend_order.get(item[1].trend, 4))
+	]
+
+
+@app.get("/tiles/{tile_id}/temporal-signature")
+def temporal_signature_detail(tile_id: str):
+	if not db.get_tile_history(tile_id):
+		raise HTTPException(404, "Tile not found")
+	result = temporal_signature.compute_velocity(tile_id)
+	return {
+		"series": result.series,
+		"velocities": result.velocities,
+		"score_sources": result.score_sources,
+		"acceleration": result.acceleration,
+		"trend": result.trend,
+		"latest_velocity": result.latest_velocity,
+	}
+
+
+@app.get("/tiles/{tile_id}/storyline")
+def tile_storyline(tile_id: str):
+	if not db.get_tile_history(tile_id):
+		raise HTTPException(404, "Tile not found")
+	velocity = temporal_signature.compute_velocity(tile_id)
+	profile = temporal_signature.temporal_profile(tile_id)
+	return {
+		"profile": profile,
+		"velocities": velocity.velocities,
+		"stage": storyline.classify_stage(velocity.velocities, profile),
+	}
 
 
 @app.post("/preview/image")

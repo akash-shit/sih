@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useChangeDetail, useSubmitDecision } from '@/hooks/useChanges';
+import { useTemporalSignature } from '@/hooks/useTemporalSignature';
 import { GlassPanel } from '@/components/common/GlassPanel';
 import { BeforeAfterCompare } from '@/components/common/BeforeAfterCompare';
 import { ImageZoomModal } from '@/components/common/ImageZoomModal';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { ChangeTypeBadge } from '@/components/common/ChangeTypeBadge';
 import { NDVIChart } from '@/components/common/NDVIChart';
+import { TemporalSignatureChart } from '@/components/common/TemporalSignatureChart';
 import { SkeletonCard } from '@/components/common/SkeletonCard';
 import { ErrorCard } from '@/components/common/ErrorCard';
 import { formatDate, formatPercent, formatCoord } from '@/lib/utils';
@@ -30,6 +32,7 @@ export const ChangeDetailPage: React.FC = () => {
   const navigate = useNavigate();
 
   const { data: change, isLoading, isError, refetch } = useChangeDetail(vectorId);
+  const { data: temporal } = useTemporalSignature(change?.tile_id);
   const submitDecision = useSubmitDecision();
 
   const [decisionReason, setDecisionReason] = useState('');
@@ -352,6 +355,7 @@ export const ChangeDetailPage: React.FC = () => {
               afterDate={change.after_date}
             />
           </GlassPanel>
+          {temporal && <GlassPanel className="p-6"><TemporalSignatureChart series={temporal.series} trend={temporal.trend} /></GlassPanel>}
         </>
       )}
 

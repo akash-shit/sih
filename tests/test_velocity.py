@@ -1,7 +1,7 @@
 from datetime import datetime
 from types import SimpleNamespace
 
-from app.change.temporal_signature import _effective_score, compute_velocity
+from app.change.temporal_signature import _effective_score, compute_velocity, temporal_profile
 
 
 def test_effective_score_prefers_fused_and_sar_only():
@@ -57,3 +57,38 @@ def test_velocity_uses_uneven_spacing_and_reports_trend(monkeypatch):
     assert result.trend in {"steady_change", "accelerating", "stable"}
     assert len(result.velocities) == 3
     assert result.score_sources == ["combined", "combined", "combined"]
+
+
+def test_temporal_profile_uses_first_to_last_comparison(monkeypatch):
+    candidates = [
+        SimpleNamespace(date_before="2025-01-01", date_after="2025-02-01", combined_score=0.2, sar_only=False, fused_score=None),
+        SimpleNamespace(date_before="2025-02-01", date_after="2025-03-01", combined_score=0.8, sar_only=False, fused_score=None),
+    ]
+    history = [
+        {"vector_id": 1, "acquisition_date": "2025-01-01"},
+        {"vector_id": 2, "acquisition_date": "2025-02-01"},
+        {"vector_id": 3, "acquisition_date": "2025-03-01"},
+    ]
+    long_candidate = SimpleNamespace(combined_score=0.35, sar_only=False, fused_score=None)
+    monkeypatch.setattr("app.change.temporal_signature.analyze_tile_timeline", lambda tile_id, threshold=0.0: candidates)
+    monkeypatch.setattr("app.change.temporal_signature.analyze_tile_pair", lambda first, last: long_candidate)
+    monkeypatch.setattr("app.change.temporal_signature.VectorIndex.has_vector", lambda self, vector_id: True)
+    monkeypatch.setattr("app.change.temporal_signature.db.get_tile_history", lambda tile_id: history)
+
+    profile = temporal_profile("T123")
+
+    assert profile["long"] == 0.35
+    assert profile["long"] != profile["short"]
+    assert profile["score_sources"]["long"] == "combined"
+
+
+def test_temporal_profile_handles_two_rows_and_missing_vectors(monkeypatch):
+    candidate = SimpleNamespace(date_before="2025-01-01", date_after="2025-02-01", combined_score=0.4, sar_only=False, fused_score=None)
+    monkeypatch.setattr("app.change.temporal_signature.analyze_tile_timeline", lambda tile_id, threshold=0.0: [candidate])
+    monkeypatch.setattr("app.change.temporal_signature.db.get_tile_history", lambda tile_id: [{"vector_id": 1}, {"vector_id": 2}])
+    monkeypatch.setattr("app.change.temporal_signature.VectorIndex.has_vector", lambda self, vector_id: False)
+
+    profile = temporal_profile("T123")
+
+    assert profile["long"] == profile["short"] == 0.4
+    assert profile["score_sources"]["long"] == "combined_fallback_no_direct_comparison"

@@ -4,12 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from statistics import median
 
-from app.change.detector import analyze_tile_timeline
+from app.change.detector import analyze_tile_pair, analyze_tile_timeline
+from app.geospatial import catalog_db as db
 from app.config import (
     VELOCITY_ACCEL_RATIO,
     VELOCITY_ACCEL_SLOPE_THRESHOLD,
     VELOCITY_STABLE_THRESHOLD,
 )
+from app.index.vector_index import VectorIndex
 
 
 def _effective_score(candidate) -> tuple[float, str]:
@@ -31,6 +33,7 @@ class VelocityResult:
     acceleration: float | None
     trend: str
     latest_velocity: float | None
+    series: list[dict]
 
 
 def _pair_days(candidate) -> int:
@@ -76,15 +79,23 @@ def compute_velocity(tile_id: str) -> VelocityResult:
             acceleration=None,
             trend="stable",
             latest_velocity=None,
+            series=[],
         )
 
     velocities = []
     score_sources = []
+    series = []
     for candidate in candidates:
         score, source = _effective_score(candidate)
         days = _pair_days(candidate)
-        velocities.append(score / max(days, 1))
+        velocity = score / max(days, 1)
+        velocities.append(velocity)
         score_sources.append(source)
+        series.append({
+            "date_pair": {"before": candidate.date_before, "after": candidate.date_after},
+            "velocity": velocity,
+            "source": source,
+        })
 
     latest_velocity = velocities[-1] if velocities else None
     if len(velocities) >= 3:
@@ -113,6 +124,7 @@ def compute_velocity(tile_id: str) -> VelocityResult:
         acceleration=acceleration,
         trend=trend,
         latest_velocity=latest_velocity,
+        series=series,
     )
 
 
@@ -154,14 +166,19 @@ def temporal_profile(tile_id: str) -> dict:
         _, seasonal_source = _effective_score(seasonal_candidates[-1])
 
     long_score = None
-    long_source = "combined"
-    if len(candidates) >= 2:
-        first = candidates[0]
-        last = candidates[-1]
-        long_score, long_source = _effective_score(last)
-    else:
+    long_source = None
+    history = db.get_tile_history(tile_id)
+    if len(history) >= 2:
+        first_row, last_row = history[0], history[-1]
+        index = VectorIndex()
+        if index.has_vector(first_row["vector_id"]) and index.has_vector(last_row["vector_id"]):
+            # TODO(phase2): pass matching SAR observations for the first/last rows via sar_pair.
+            long_candidate = analyze_tile_pair(first_row, last_row)
+            long_score, long_source = _effective_score(long_candidate)
+
+    if long_score is None:
         long_score = short_score
-        long_source = short_source
+        long_source = f"{short_source}_fallback_no_direct_comparison"
 
     return {
         "short": short,
@@ -176,7 +193,5 @@ def temporal_profile(tile_id: str) -> dict:
 
 
 def velocity_for_all_tiles() -> dict[str, VelocityResult]:
-    from app.geospatial import catalog_db as db
-
     tiles = db.get_all_tile_ids()
     return {tile_id: compute_velocity(tile_id) for tile_id in tiles}

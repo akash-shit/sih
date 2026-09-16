@@ -14,6 +14,7 @@ import {
   ChevronRight,
   LogOut,
   Satellite,
+  Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -36,6 +37,7 @@ const mainNavItems: NavItem[] = [
   { label: 'Areas of Interest', path: '/aois', icon: Map },
   { label: 'Semantic Search', path: '/search', icon: Search },
   { label: 'Change Detection', path: '/changes', icon: Radar },
+  { label: 'Velocity', path: '/velocity', icon: Activity },
   { label: 'Review Queue', path: '/review', icon: ClipboardCheck },
   { label: 'Discovery Clusters', path: '/clusters', icon: Network },
   { label: 'Onboard AOI', path: '/onboard', icon: FolderPlus },
