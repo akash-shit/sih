@@ -12,6 +12,12 @@ This repository was extended only through the Phase 1 temporal-signature foundat
 
 ## Not implemented in this pass
 
-The remaining innovation phases in the master prompt (SAR fusion, land-cover adaptive scoring, strategic priority scoring, active-learning reranking, heatmaps, self-calibration, optional LLM brief, and the broader frontend/backend API surface) are intentionally not forced into the existing codebase in a way that would break optical-only scoring or existing API compatibility. The repository’s current optical detector and SQLite schema remain the ground truth.
+The v0.2 innovation layer is implemented additively. SAR is limited to
+backscatter-delta change detection on Sentinel-1 GRD/monthly mosaic VV/VH
+data; it is not interferometric coherence. Land-cover labels are heuristic,
+priority and active learning are analyst-facing ranking signals, and heatmaps
+are explanatory rather than ground-truth evidence. Scientific metrics and
+real-data SAR sanity checks remain pending until representative products are
+available.
 
 This record exists to document that the full multi-phase upgrade is a larger project and should be implemented in smaller additive layers, with each phase validated against the existing test suite before the next is introduced.

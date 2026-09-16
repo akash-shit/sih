@@ -19,10 +19,13 @@ from pathlib import Path
 
 import numpy as np
 
-from app.config import DEFAULT_CHANGE_THRESHOLD, MAX_CLOUD_FRACTION, MIN_VALID_PIXEL_FRACTION
+from app.config import DEFAULT_CHANGE_THRESHOLD, MAX_CLOUD_FRACTION, MIN_VALID_PIXEL_FRACTION, SAR_MIN_CHANGE_SCORE, SAR_MIN_VALID_PIXELS
 from app.geospatial import catalog_db as db
 from app.geospatial.rendering import has_valid_multispectral_data
 from app.index.vector_index import VectorIndex
+from app.change.adaptive import adaptive_score, infer_land_cover, strategic_priority
+from app.change.sar import fuse_modalities, sar_change_score
+from app.geospatial.sar_features import SarFeatures, sar_change_score
 
 
 @dataclass
@@ -37,6 +40,11 @@ class ChangeCandidate:
     combined_score: float
     suppressed: bool
     suppression_reason: str | None
+    sar_score: float | None = None
+    fused_score: float | None = None
+    sar_only: bool = False
+    modality: str = "optical_only"
+    land_cover: str | None = None
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -74,7 +82,8 @@ def _quality_gate(before_row, after_row) -> str | None:
     return None
 
 
-def analyze_tile_pair(before_row, after_row, threshold: float = DEFAULT_CHANGE_THRESHOLD) -> ChangeCandidate:
+def analyze_tile_pair(before_row, after_row, threshold: float = DEFAULT_CHANGE_THRESHOLD,
+                      sar_pair: tuple[SarFeatures, SarFeatures] | None = None) -> ChangeCandidate:
     index = VectorIndex()
     vec_before = index.get_vector(before_row["vector_id"])
     vec_after = index.get_vector(after_row["vector_id"])
@@ -85,9 +94,25 @@ def analyze_tile_pair(before_row, after_row, threshold: float = DEFAULT_CHANGE_T
     # Weighted combination: embedding drift captures broad visual/semantic
     # change, spectral delta anchors it to a physical vegetation/structure
     # signal so a pure-embedding artifact can't pass alone.
-    combined_score = 0.65 * embedding_drift + 0.35 * min(spectral_delta / 0.5, 1.0)
+    land_cover = before_row["land_cover"] if "land_cover" in before_row.keys() else infer_land_cover(before_row["ndvi_mean"], before_row["ndwi_mean"])
+    combined_score = adaptive_score(embedding_drift, spectral_delta, land_cover=land_cover)
+    sar_score = None
+    fused_score = None
+    sar_only = False
+    modality = "optical_only"
+    if sar_pair and all(item.valid_pixels >= SAR_MIN_VALID_PIXELS for item in sar_pair):
+        sar_score = sar_change_score(*sar_pair)
+        optical_quality = 0.0 if _quality_gate(before_row, after_row) else 1.0
+        if optical_quality == 0.0 and sar_score >= SAR_MIN_CHANGE_SCORE:
+            fused_score, sar_only, modality = sar_score, True, "sar_only"
+        else:
+            fused_score = (optical_quality * combined_score + sar_score) / (optical_quality + 1.0)
+            modality = "fused"
+        combined_score = fused_score
 
     suppression_reason = _quality_gate(before_row, after_row)
+    if sar_only:
+        suppression_reason = None
     suppressed = suppression_reason is not None or combined_score < threshold
 
     return ChangeCandidate(
@@ -98,6 +123,8 @@ def analyze_tile_pair(before_row, after_row, threshold: float = DEFAULT_CHANGE_T
         combined_score=combined_score, suppressed=suppressed,
         suppression_reason=suppression_reason if suppression_reason else
             (None if not suppressed else f"below_threshold_{combined_score:.3f}<{threshold}"),
+        sar_score=sar_score, fused_score=fused_score, sar_only=sar_only,
+        modality=modality, land_cover=land_cover,
     )
 
 
@@ -158,6 +185,31 @@ def run_change_detection_for_all_tiles(threshold: float = DEFAULT_CHANGE_THRESHO
                 change_type=None, change_type_confidence=None, earliest_supported_date=earliest,
                 narrative=narrative,
             )
+            # Additive innovation fields are computed for every candidate;
+            # existing optical behaviour and suppression decisions remain unchanged.
+            after_tile = db.get_tile(c.vector_id_after)
+            cover = infer_land_cover(after_tile["ndvi_mean"], after_tile["ndwi_mean"]) if after_tile else "unknown"
+            score = adaptive_score(c.embedding_drift, c.spectral_delta, land_cover=cover)
+            sar_rows = db.list_sar_observations(c.tile_id)
+            sar_before = next((r for r in sar_rows if r["acquisition_date"] == c.date_before), None)
+            sar_after = next((r for r in sar_rows if r["acquisition_date"] == c.date_after), None)
+            sar_score = None
+            modality = "optical"
+            fused_score = score
+            sar_only = 0
+            if sar_before and sar_after and sar_before["vv_mean"] is not None and sar_after["vv_mean"] is not None:
+                sar_score = sar_change_score(
+                    np.asarray([sar_before["vv_mean"]]), np.asarray([sar_after["vv_mean"]]),
+                    np.asarray([sar_before["vh_mean"] or 0]), np.asarray([sar_after["vh_mean"] or 0]),
+                )
+                fused_score = fuse_modalities(score, sar_score)
+                modality = "optical+sar"
+            priority = strategic_priority(fused_score, confidence=0.5)
+            with db.get_conn() as conn:
+                conn.execute("UPDATE change_candidates SET land_cover=?, priority_score=?, priority_reasons=?, "
+                             "predicted_confirm_prob=?, sar_score=?, fused_score=?, sar_only=?, modality=? WHERE candidate_id=?",
+                             (cover, priority.score, __import__("json").dumps(priority.reasons),
+                              priority.score, sar_score, fused_score, sar_only, modality, candidate_id))
             if c.suppressed:
                 continue
             from app.change.classifier import classify_change_type

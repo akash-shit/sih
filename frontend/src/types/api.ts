@@ -126,6 +126,16 @@ export interface ChangeCandidate {
   before_source_available: boolean;
   after_source_available: boolean;
   source_unavailable_reason: string | null;
+  land_cover?: string | null;
+  priority_score?: number | null;
+  priority_reasons?: string[];
+  predicted_confirm_prob?: number | null;
+  modality?: string | null;
+  sar_score?: number | null;
+  fused_score?: number | null;
+  sar_only?: boolean;
+  heatmap_spectral_url?: string | null;
+  llm_narrative?: string | null;
 }
 
 export interface ReviewQuality {

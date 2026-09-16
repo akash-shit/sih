@@ -15,6 +15,10 @@ import numpy as np
 
 from app.geospatial import catalog_db as db
 from app.index.vector_index import VectorIndex
+from app.config import ACTIVE_LEARNING_MIN_EXAMPLES, ACTIVE_LEARNING_MIN_PER_CLASS, DATA_DIR
+from pathlib import Path
+import pickle
+import os
 
 
 @dataclass
@@ -30,15 +34,60 @@ class ReviewItem:
     change_type_confidence: float | None
     tile_path_before: str
     tile_path_after: str
+    predicted_confirm_prob: float | None = None
 
 
-def get_review_queue(limit: int = 50) -> list[ReviewItem]:
+LEARNER_PATH = DATA_DIR / "models_learned" / "active_learner.pkl"
+
+
+def _feature_vector(row):
+    get = lambda name, default=0: row[name] if hasattr(row, "keys") and name in row.keys() and row[name] is not None else default
+    return [get("embedding_drift"), get("spectral_delta"), get("cloud_fraction"),
+            get("haze_score"), get("fused_score", get("combined_score")), get("sar_score")]
+
+
+def _maybe_retrain_learner():
+    from sklearn.linear_model import LogisticRegression
+    with db.get_conn() as conn:
+        rows = conn.execute("SELECT al.analyst_decision, cc.*, tb.cloud_fraction, tb.haze_score FROM audit_log al JOIN change_candidates cc ON cc.candidate_id=al.candidate_id LEFT JOIN tiles tb ON tb.vector_id=cc.vector_id_before").fetchall()
+    labels = [1 if str(row["analyst_decision"]).lower() == "confirm" else 0 for row in rows]
+    if len(rows) < ACTIVE_LEARNING_MIN_EXAMPLES or min(labels.count(0), labels.count(1)) < ACTIVE_LEARNING_MIN_PER_CLASS:
+        return None
+    model = LogisticRegression(max_iter=200, class_weight="balanced").fit([_feature_vector(row) for row in rows], labels)
+    LEARNER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = LEARNER_PATH.with_suffix(".tmp")
+    with temporary.open("wb") as handle:
+        pickle.dump(model, handle)
+    os.replace(temporary, LEARNER_PATH)
+    return model
+
+
+def learner_status() -> dict:
+    with db.get_conn() as conn:
+        rows = conn.execute("SELECT lower(analyst_decision) decision, COUNT(*) n FROM audit_log GROUP BY lower(analyst_decision)").fetchall()
+    positive = next((row["n"] for row in rows if row["decision"] == "confirm"), 0)
+    negative = next((row["n"] for row in rows if row["decision"] == "reject"), 0)
+    return {"trained": LEARNER_PATH.exists(), "n_examples": positive + negative, "n_positive": positive, "n_negative": negative}
+
+
+def get_review_queue(limit: int = 50, sort: str = "combined_score") -> list[ReviewItem]:
     rows = db.list_review_queue(include_suppressed=False, limit=limit)
     items = []
+    model = None
+    if sort == "learned" and LEARNER_PATH.exists():
+        try:
+            with LEARNER_PATH.open("rb") as handle:
+                model = pickle.load(handle)
+        except (OSError, pickle.PickleError):
+            model = None
+    scored = []
     for r in rows:
         before = db.get_tile(r["vector_id_before"])
         after = db.get_tile(r["vector_id_after"])
-        items.append(ReviewItem(
+        probability = None
+        if model is not None:
+            probability = float(model.predict_proba([_feature_vector(r)])[0, 1])
+        scored.append(ReviewItem(
             candidate_id=r["candidate_id"], tile_id=r["tile_id"],
             date_before=r["date_before"], date_after=r["date_after"],
             combined_score=r["combined_score"], embedding_drift=r["embedding_drift"],
@@ -46,8 +95,11 @@ def get_review_queue(limit: int = 50) -> list[ReviewItem]:
             change_type_confidence=r["change_type_confidence"],
             tile_path_before=before["tile_path"] if before else "",
             tile_path_after=after["tile_path"] if after else "",
+            predicted_confirm_prob=probability,
         ))
-    return items
+    if sort == "learned" and model is not None:
+        scored.sort(key=lambda item: item.predicted_confirm_prob or 0, reverse=True)
+    return scored
 
 
 def submit_decision(candidate_id: int, decision: str, reason: str = None):
@@ -58,6 +110,7 @@ def submit_decision(candidate_id: int, decision: str, reason: str = None):
         _boost_similar_open_candidates(candidate_id)
     elif decision == "reject":
         _suppress_similar_open_candidates(candidate_id)
+    _maybe_retrain_learner()
 
 
 def _boost_similar_open_candidates(confirmed_candidate_id: int, boost: float = 0.05,

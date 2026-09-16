@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS aois (
     minlon REAL, minlat REAL, maxlon REAL, maxlat REAL,
     first_date TEXT, last_date TEXT,
     created_at TEXT NOT NULL
+    ,priority_tier TEXT DEFAULT 'medium'
+    ,priority_geojson TEXT
 );
 
 CREATE TABLE IF NOT EXISTS scenes (
@@ -100,6 +102,29 @@ CREATE TABLE IF NOT EXISTS change_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_tile ON change_candidates(tile_id);
 
+CREATE TABLE IF NOT EXISTS sar_observations (
+    sar_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tile_id TEXT,
+    scene_path TEXT NOT NULL,
+    acquisition_date TEXT NOT NULL,
+    vv_mean REAL,
+    vh_mean REAL,
+    valid_fraction REAL,
+    metadata TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sar_tile_date ON sar_observations(tile_id, acquisition_date);
+
+CREATE TABLE IF NOT EXISTS sar_tiles (
+    sar_tile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tile_id TEXT, aoi_id INTEGER, sensor TEXT, product_type TEXT,
+    period_start TEXT, period_end TEXT, acquisition_datetime TEXT,
+    tile_path TEXT, vv_mean_db REAL, vh_mean_db REAL,
+    vv_std_db REAL, vh_std_db REAL, vv_minus_vh_db REAL, valid_pixels REAL,
+    speckle_filter_applied INTEGER DEFAULT 0, processing_version TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sar_tile_id ON sar_tiles(tile_id);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     log_id INTEGER PRIMARY KEY AUTOINCREMENT,
     candidate_id INTEGER,
@@ -154,6 +179,8 @@ def init_db():
         _ensure_column(conn, "tiles", "velocity_trend", "TEXT")
         _ensure_column(conn, "tiles", "latest_velocity", "REAL")
         _ensure_column(conn, "tiles", "land_cover", "TEXT")
+        _ensure_column(conn, "aois", "priority_tier", "TEXT DEFAULT 'medium'")
+        _ensure_column(conn, "aois", "priority_geojson", "TEXT")
         _ensure_column(conn, "change_candidates", "changed_fraction", "REAL")
         _ensure_column(conn, "change_candidates", "pixel_diff_score", "REAL")
         _ensure_column(conn, "change_candidates", "change_region", "TEXT")
@@ -177,6 +204,28 @@ def init_db():
         # executescript() for a database that predates the aois table.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tiles_aoi ON tiles(aoi_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scenes_aoi ON scenes(aoi_id)")
+
+
+def register_sar_observation(*, tile_id: str | None, scene_path: str, acquisition_date: str,
+                             vv_mean: float | None = None, vh_mean: float | None = None,
+                             valid_fraction: float | None = None, metadata: dict | None = None) -> int:
+    """Persist SAR provenance without altering optical scene/tile records."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO sar_observations
+               (tile_id, scene_path, acquisition_date, vv_mean, vh_mean, valid_fraction, metadata, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (tile_id, scene_path, acquisition_date, vv_mean, vh_mean, valid_fraction,
+             json.dumps(metadata) if metadata else None, datetime.now(timezone.utc).isoformat()),
+        )
+        return cur.lastrowid
+
+
+def list_sar_observations(tile_id: str | None = None) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        if tile_id:
+            return conn.execute("SELECT * FROM sar_observations WHERE tile_id=? ORDER BY acquisition_date", (tile_id,)).fetchall()
+        return conn.execute("SELECT * FROM sar_observations ORDER BY acquisition_date").fetchall()
 
 
 # ---- AOI registry --------------------------------------------------------

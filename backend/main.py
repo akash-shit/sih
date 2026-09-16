@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.config import TILE_SIZE_PX
 from app.change import storyline, temporal_signature
+from app.change import adaptive, brief, heatmap, sar
 from app.discovery import clustering
 from app.geospatial import catalog_db as db
 from app.index import search as index_search
@@ -74,9 +75,26 @@ class ReviewDecision(BaseModel):
 	reason: str | None = None
 
 
+class SARIngestRequest(BaseModel):
+	scene_path: str
+	acquisition_date: str
+	tile_id: str | None = None
+	vv_mean: float | None = None
+	vh_mean: float | None = None
+	valid_fraction: float = Field(default=1.0, ge=0, le=1)
+	metadata: dict | None = None
+
+
 class OnboardRequest(BaseModel):
 	name: str
 	source_folder: str
+	priority_tier: str = "medium"
+	priority_geojson: str | None = None
+
+
+class AOIPriorityUpdate(BaseModel):
+	priority_tier: str | None = None
+	priority_geojson: str | None = None
 
 
 class Stats(BaseModel):
@@ -197,6 +215,16 @@ class ChangeCandidate(BaseModel):
 	before_source_available: bool
 	after_source_available: bool
 	source_unavailable_reason: str | None
+	land_cover: str | None = None
+	priority_score: float | None = None
+	priority_reasons: list[str] = []
+	predicted_confirm_prob: float | None = None
+	modality: str | None = None
+	sar_score: float | None = None
+	fused_score: float | None = None
+	sar_only: bool = False
+	heatmap_spectral_url: str | None = None
+	llm_narrative: str | None = None
 
 
 class ReviewQuality(BaseModel):
@@ -425,6 +453,13 @@ def candidate_public(row, request: Request, decisions: dict[int, object]) -> dic
 		"before_thumbnail_url": before_url, "after_thumbnail_url": after_url,
 		"before_source_available": before_available, "after_source_available": after_available,
 		"source_unavailable_reason": source_reason,
+		"land_cover": row["land_cover"], "priority_score": row["priority_score"],
+		"priority_reasons": json.loads(row["priority_reasons"] or "[]"),
+		"predicted_confirm_prob": row["predicted_confirm_prob"], "modality": row["modality"],
+		"sar_score": row["sar_score"], "fused_score": row["fused_score"],
+		"sar_only": bool(row["sar_only"] or 0),
+		"heatmap_spectral_url": row["heatmap_spectral"],
+		"llm_narrative": row["llm_narrative"],
 	}
 
 
@@ -505,6 +540,25 @@ def aois(request: Request):
 					   "start_date": row["first_date"], "end_date": row["last_date"], "scene_count": row["scene_count"], "tile_count": row["tile_count"],
 					   "mosaic_thumbnail_url": thumb, "last_activity": row["last_candidate"] or row["last_date"]})
 	return result
+
+
+@app.patch("/aois/{aoi_id}")
+def update_aoi_priority(aoi_id: str, payload: AOIPriorityUpdate):
+	aoi = aoi_row(aoi_id)
+	if payload.priority_tier is not None and payload.priority_tier not in {"low", "medium", "high"}:
+		raise HTTPException(400, "priority_tier must be low, medium, or high")
+	updates = []
+	values = []
+	if payload.priority_tier is not None:
+		updates.append("priority_tier=?")
+		values.append(payload.priority_tier)
+	if payload.priority_geojson is not None:
+		updates.append("priority_geojson=?")
+		values.append(payload.priority_geojson)
+	if updates:
+		with db.get_conn() as conn:
+			conn.execute(f"UPDATE aois SET {', '.join(updates)} WHERE aoi_id=?", (*values, aoi["aoi_id"]))
+	return {"ok": True, "aoi_id": aoi_id}
 
 
 def _latest_aoi_mosaic(aoi_id: int, request: Request) -> str | None:
@@ -699,20 +753,44 @@ async def image_search(request: Request, file: Annotated[UploadFile, File(...)],
 
 
 @app.get("/changes/candidates", response_model=list[ChangeCandidate])
-def candidates(request: Request, status: str | None = None, aoi_id: str | None = None, limit: int = Query(24, ge=1, le=100)):
+def candidates(request: Request, status: str | None = None, aoi_id: str | None = None,
+			   sort: str = Query("combined_score"), min_priority: float | None = Query(None, ge=0, le=1),
+			   modality: str | None = None, limit: int = Query(24, ge=1, le=100)):
 	decisions = latest_decisions()
 	with db.get_conn() as conn:
 		join = " JOIN tiles t ON t.tile_id = cc.tile_id AND t.vector_id = cc.vector_id_after" if aoi_id else ""
-		where = " WHERE t.aoi_id = ?" if aoi_id else ""
+		clauses = ["t.aoi_id = ?"] if aoi_id else []
 		params = (aoi_row(aoi_id)["aoi_id"],) if aoi_id else ()
+		if min_priority is not None:
+			clauses.append("COALESCE(cc.priority_score, 0) >= ?")
+			params += (min_priority,)
+		if modality:
+			clauses.append("cc.modality = ?")
+			params += (modality,)
+		where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+		order_column = {"priority": "COALESCE(cc.priority_score, 0)", "learned": "COALESCE(cc.predicted_confirm_prob, 0)", "combined_score": "cc.combined_score"}.get(sort, "cc.combined_score")
 		limit_clause = " LIMIT ?" if not status else ""
 		params += (limit,) if not status else ()
 		rows = conn.execute(
-			f"SELECT cc.* FROM change_candidates cc{join}{where} ORDER BY cc.combined_score DESC{limit_clause}",
+			f"SELECT cc.* FROM change_candidates cc{join}{where} ORDER BY {order_column} DESC{limit_clause}",
 			params,
 		).fetchall()
 	items = [item for row in rows if not status or candidate_status(row, decisions) == status.upper() for item in [candidate_public(row, request, decisions)]]
 	return items[:limit]
+
+
+@app.post("/changes/recompute-priority")
+def recompute_priority():
+	from app.change.priority import compute_priority
+	updated = 0
+	with db.get_conn() as conn:
+		rows = conn.execute("SELECT cc.*, t.minlat, t.maxlat, t.minlon, t.maxlon, a.* FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after LEFT JOIN aois a ON a.aoi_id=t.aoi_id").fetchall()
+		hotspots = [dict(row) for row in conn.execute("SELECT cc.*, t.minlat, t.maxlat, t.minlon, t.maxlon FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after JOIN audit_log al ON al.candidate_id=cc.candidate_id WHERE lower(al.analyst_decision)='confirm'").fetchall()]
+		for row in rows:
+			score = compute_priority(row, row, hotspots)
+			conn.execute("UPDATE change_candidates SET priority_score=?, priority_reasons=? WHERE candidate_id=?", (score, row["priority_reasons"], row["candidate_id"]))
+			updated += 1
+	return {"updated": updated}
 
 
 @app.get("/changes/candidates/data-quality", response_model=ReviewQuality)
@@ -764,6 +842,15 @@ def candidate_review_quality():
 	return result
 
 
+@app.get("/changes/priority")
+def priority_changes_early(limit: int = Query(24, ge=1, le=200), aoi_id: str | None = None):
+	with db.get_conn() as conn:
+		rows = conn.execute("SELECT cc.* FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after "
+			"WHERE cc.suppressed=0 AND (? IS NULL OR t.aoi_id=?) ORDER BY COALESCE(cc.priority_score, cc.combined_score) DESC LIMIT ?",
+			(aoi_id, aoi_id, limit)).fetchall()
+	return [dict(row) for row in rows]
+
+
 @app.get("/changes/{vector_id}", response_model=ChangeDetail)
 def change(vector_id: int, request: Request):
 	with db.get_conn() as conn:
@@ -790,6 +877,12 @@ def change(vector_id: int, request: Request):
 				"UPDATE change_candidates SET changed_fraction=?, pixel_diff_score=?, change_region=?, change_centroid_x=?, change_centroid_y=? WHERE candidate_id=?",
 				(changed_fraction, changed_fraction, change_region, centroid_x, centroid_y, row["candidate_id"]),
 			)
+		from app.change.heatmap import spectral_diff_heatmap
+		heatmap_path = row["heatmap_spectral"] or spectral_diff_heatmap(before["tile_path"], after["tile_path"])
+		if heatmap_path and not row["heatmap_spectral"]:
+			with db.get_conn() as conn:
+				conn.execute("UPDATE change_candidates SET heatmap_spectral=? WHERE candidate_id=?", (heatmap_path, row["candidate_id"]))
+			result["heatmap_spectral_url"] = public_url(request, ROOT / heatmap_path)
 	ndvi_change = None
 	if before["ndvi_mean"] is not None and after["ndvi_mean"] is not None:
 		ndvi_change = after["ndvi_mean"] - before["ndvi_mean"]
@@ -839,7 +932,11 @@ def run_calibration():
 @app.get("/calibration/results")
 def get_calibration_results():
 	from app.change.calibration import calibration_results
-	return calibration_results()
+	result = calibration_results()
+	from app.review.queue import learner_status
+	if isinstance(result, dict):
+		result["learner"] = learner_status()
+	return result
 
 
 def _export_rows(status: str) -> list[dict]:
@@ -988,6 +1085,78 @@ def onboard_job(job_id: str):
 	if job is None:
 		raise HTTPException(404, "Onboarding job not found")
 	return job
+
+
+@app.post("/sar/observations")
+def ingest_sar_observation(payload: SARIngestRequest):
+	"""Register a SAR observation independently of optical ingestion."""
+	db.init_db()
+	sar_id = db.register_sar_observation(tile_id=payload.tile_id, scene_path=payload.scene_path,
+		acquisition_date=payload.acquisition_date, vv_mean=payload.vv_mean,
+		vh_mean=payload.vh_mean, valid_fraction=payload.valid_fraction, metadata=payload.metadata)
+	return {"ok": True, "sar_id": sar_id}
+
+
+@app.get("/sar/observations")
+def sar_observations(tile_id: str | None = None):
+	return [dict(row) for row in db.list_sar_observations(tile_id)]
+
+
+@app.get("/changes/{candidate_id}/explanations")
+def candidate_explanations(candidate_id: int):
+	with db.get_conn() as conn:
+		row = conn.execute("SELECT * FROM change_candidates WHERE candidate_id=?", (candidate_id,)).fetchone()
+	if row is None:
+		raise HTTPException(404, "Candidate not found")
+	spectral_heatmap = row["heatmap_spectral"]
+	if not spectral_heatmap:
+		before, after = db.get_tile(row["vector_id_before"]), db.get_tile(row["vector_id_after"])
+		if before and after and Path(before["tile_path"]).exists() and Path(after["tile_path"]).exists():
+			try:
+				import rasterio
+				with rasterio.open(before["tile_path"]) as src:
+					before_data = src.read([1, 2, 3, 4])
+				with rasterio.open(after["tile_path"]) as src:
+					after_data = src.read([1, 2, 3, 4])
+				maps = heatmap.explainable_heatmaps(before_data, after_data)
+				spectral_heatmap = maps["spectral"]
+				with db.get_conn() as conn:
+					conn.execute("UPDATE change_candidates SET heatmap_spectral=?, heatmap_attention=? WHERE candidate_id=?",
+						(spectral_heatmap, maps.get("attention"), candidate_id))
+			except (OSError, ValueError):
+				spectral_heatmap = None
+	return {"candidate_id": candidate_id, "modality": row["modality"], "land_cover": row["land_cover"],
+			"priority_score": row["priority_score"], "priority_reasons": json.loads(row["priority_reasons"] or "[]"),
+			"heatmap_spectral": spectral_heatmap, "heatmap_attention": row["heatmap_attention"],
+			"narrative": row["llm_narrative"] or row["narrative"]}
+
+
+@app.post("/changes/{candidate_id}/brief")
+def generate_candidate_brief(candidate_id: int):
+	from app.change.llm_brief import generate_llm_brief
+	with db.get_conn() as conn:
+		row = conn.execute("SELECT * FROM change_candidates WHERE candidate_id=?", (candidate_id,)).fetchone()
+	if row is None:
+		raise HTTPException(404, "Candidate not found")
+	facts = {key: row[key] for key in (
+		"date_before", "date_after", "change_type", "change_type_confidence",
+		"spectral_delta", "embedding_drift", "combined_score", "earliest_supported_date",
+		"changed_fraction", "modality", "sar_score", "fused_score",
+	) if key in row.keys() and row[key] is not None}
+	brief_text = generate_llm_brief(facts)
+	if brief_text is not None:
+		with db.get_conn() as conn:
+			conn.execute("UPDATE change_candidates SET llm_narrative=? WHERE candidate_id=?", (brief_text, candidate_id))
+	return {"candidate_id": candidate_id, "llm_narrative": brief_text}
+
+
+@app.get("/aois/{aoi_id}/narrative")
+def aoi_narrative(aoi_id: str):
+	aoi = aoi_row(aoi_id)
+	with db.get_conn() as conn:
+		rows = conn.execute("SELECT * FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after "
+			"WHERE t.aoi_id=? AND cc.suppressed=0", (aoi["aoi_id"],)).fetchall()
+	return {"aoi_id": aoi_id, "narrative": brief.aoi_narrative(aoi["name"], [dict(r) for r in rows])}
 
 
 if FRONTEND_DIST.exists():

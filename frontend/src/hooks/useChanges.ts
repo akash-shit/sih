@@ -8,14 +8,16 @@ import type {
   ReviewResponse,
 } from '@/types/api';
 
-export function useChangeCandidates(status?: string, aoiId?: string) {
+export function useChangeCandidates(status?: string, aoiId?: string, sort: 'combined_score' | 'priority' | 'learned' = 'combined_score', modality?: string) {
   return useQuery<ChangeCandidate[]>({
-    queryKey: ['change-candidates', status, aoiId],
+    queryKey: ['change-candidates', status, aoiId, sort, modality],
     queryFn: ({ signal }) =>
       api.get<ChangeCandidate[]>('/changes/candidates', {
         status: status && status !== 'ALL' ? status : undefined,
         aoi_id: aoiId || undefined,
         limit: 24,
+        sort,
+        modality,
       }, signal),
     staleTime: 30000,
     gcTime: 5 * 60 * 1000,

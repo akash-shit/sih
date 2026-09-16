@@ -290,6 +290,46 @@ def cmd_calibrate(args):
     print(json.dumps(calibrate_from_audit(), indent=2))
 
 
+def cmd_ingest_sar(args):
+    from app.change.sar import ingest_sar_manifest, observation_from_raster
+    from app.geospatial import catalog_db as db
+    db.init_db()
+    if args.raster and not args.date:
+        raise ValueError("--date is required with --raster")
+    observations = ([observation_from_raster(args.manifest, args.date)]
+                    if args.raster else ingest_sar_manifest(args.manifest))
+    ids = [db.register_sar_observation(tile_id=args.tile_id, scene_path=o.path,
+             acquisition_date=o.acquisition_date, vv_mean=o.vv_mean,
+             vh_mean=o.vh_mean, valid_fraction=o.valid_fraction) for o in observations]
+    print(json.dumps({"status": "ingested", "observations": len(ids), "sar_ids": ids}, indent=2))
+
+
+def cmd_sar_stats(args):
+    from app.geospatial import catalog_db as db
+    db.init_db()
+    with db.get_conn() as conn:
+        rows = conn.execute("SELECT * FROM sar_tiles").fetchall()
+        observations = conn.execute("SELECT * FROM sar_observations").fetchall()
+    values = rows or observations
+    print(json.dumps({
+        "observations": len(values),
+        "valid_pixels": [row["valid_pixels"] if "valid_pixels" in row.keys() else row["valid_fraction"] for row in values],
+        "vv_mean_db": [row["vv_mean_db"] if "vv_mean_db" in row.keys() else row["vv_mean"] for row in values],
+        "vh_mean_db": [row["vh_mean_db"] if "vh_mean_db" in row.keys() else row["vh_mean"] for row in values],
+    }, indent=2))
+
+
+def cmd_backfill_landcover(args):
+    from app.geospatial import catalog_db as db
+    from app.change.landcover import classify_land_cover
+    db.init_db()
+    with db.get_conn() as conn:
+        rows = conn.execute("SELECT vector_id, ndvi_mean, ndwi_mean FROM tiles").fetchall()
+        for row in rows:
+            conn.execute("UPDATE tiles SET land_cover=? WHERE vector_id=?", (classify_land_cover(row["ndvi_mean"], row["ndwi_mean"]), row["vector_id"]))
+    print(json.dumps({"updated": len(rows)}))
+
+
 def cmd_eval_report(args):
     import hashlib
     from app.config import CLIP_DEVICE, DATA_DIR, CLIP_MODEL_NAME, EMBEDDING_DIM, REMOTECLIP_CHECKPOINT
@@ -358,6 +398,17 @@ def main():
     p.add_argument("--threshold", type=float, default=0.22)
     p.add_argument("--classify", action="store_true", default=True, help="Run zero-shot change-type classification (default)")
     p.set_defaults(func=cmd_detect_changes)
+
+    p = sub.add_parser("ingest-sar", help="Register Sentinel-1 observations from a JSON manifest")
+    p.add_argument("manifest")
+    p.add_argument("--tile-id", default=None)
+    p.add_argument("--raster", action="store_true", help="Interpret manifest argument as VV/VH GeoTIFF")
+    p.add_argument("--date", default=None, help="Acquisition date for --raster")
+    p.set_defaults(func=cmd_ingest_sar)
+    p = sub.add_parser("sar-stats", help="Print coverage and value ranges for ingested SAR observations")
+    p.set_defaults(func=cmd_sar_stats)
+    p = sub.add_parser("backfill-landcover", help="Populate heuristic land-cover labels for existing optical tiles")
+    p.set_defaults(func=cmd_backfill_landcover)
 
     p = sub.add_parser("cluster", help="Run discovery clustering over all indexed tiles")
     p.add_argument("--min-cluster-size", dest="min_cluster_size", type=int, default=3)

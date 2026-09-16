@@ -17,6 +17,8 @@ export const OnboardPage: React.FC = () => {
   const [aoiName, setAoiName] = useState('');
   const [sourceFolder, setSourceFolder] = useState('');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [priorityTier, setPriorityTier] = useState('medium');
+  const [priorityGeojson, setPriorityGeojson] = useState('');
 
   const startOnboard = useStartOnboard();
   const { data: job } = useOnboardJob(activeJobId);
@@ -29,6 +31,8 @@ export const OnboardPage: React.FC = () => {
       {
         name: aoiName.trim().toLowerCase(),
         source_folder: sourceFolder.trim(),
+        priority_tier: priorityTier,
+        priority_geojson: priorityGeojson || undefined,
       },
       {
         onSuccess: (data) => {
@@ -48,6 +52,16 @@ export const OnboardPage: React.FC = () => {
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
+      <div>
+        <label className="block text-xs font-mono uppercase text-text-muted mb-2">Priority tier</label>
+        <select value={priorityTier} onChange={(e) => setPriorityTier(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.1] text-sm text-text-primary">
+          <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-mono uppercase text-text-muted mb-2">Priority GeoJSON (optional)</label>
+        <textarea value={priorityGeojson} onChange={(e) => setPriorityGeojson(e.target.value)} rows={3} className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.1] text-sm font-mono text-text-primary" />
+      </div>
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-text-primary">
           Onboard New Area of Interest (AOI)

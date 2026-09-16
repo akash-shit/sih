@@ -5,6 +5,8 @@ import type { OnboardJob } from '@/types/api';
 export interface StartOnboardPayload {
   name: string;
   source_folder: string;
+  priority_tier?: string;
+  priority_geojson?: string;
 }
 
 export function useStartOnboard() {

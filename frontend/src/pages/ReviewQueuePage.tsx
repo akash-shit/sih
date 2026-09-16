@@ -20,13 +20,14 @@ import {
 import { motion } from 'framer-motion';
 
 export const ReviewQueuePage: React.FC = () => {
+  const [sort, setSort] = useState<'combined_score' | 'priority' | 'learned'>('combined_score');
   const [activeTab, setActiveTab] = useState<'ALL' | 'OPEN' | 'CONFIRMED' | 'REJECTED' | 'SUPPRESSED' | 'audit'>('OPEN');
   const {
     data: candidates,
     isLoading: candidatesLoading,
     isError: candidatesError,
     refetch: refetchCandidates,
-  } = useChangeCandidates(activeTab === 'audit' ? undefined : activeTab);
+  } = useChangeCandidates(activeTab === 'audit' ? undefined : activeTab, undefined, sort);
 
   const { data: auditLogs, isLoading: auditLoading } = useAuditLog();
   const submitDecision = useSubmitDecision();
@@ -83,6 +84,13 @@ export const ReviewQueuePage: React.FC = () => {
           <p className="text-xs text-text-secondary mt-1 font-mono">
             Human-in-the-Loop decision verification for high-confidence change anomalies
           </p>
+        </div>
+        <div className="flex gap-2 text-xs font-mono">
+          {(['combined_score', 'priority', 'learned'] as const).map((value) => (
+            <button key={value} onClick={() => setSort(value)} className={`px-2 py-1 rounded border ${sort === value ? 'border-aurora-400 text-aurora-300' : 'border-white/[0.1] text-text-muted'}`}>
+              {value === 'combined_score' ? 'Confidence' : value === 'priority' ? 'Strategic Priority' : 'AI-learned'}
+            </button>
+          ))}
         </div>
 
         {/* View Toggle */}
@@ -178,6 +186,8 @@ export const ReviewQueuePage: React.FC = () => {
 
                     <div className="flex items-center justify-between pt-1 border-t border-white/[0.06]">
                       <ChangeTypeBadge type={cand.change_type} size="sm" />
+                      {cand.sar_only ? <span className="text-[10px] text-amber-300">SAR-ONLY</span> : cand.fused_score != null ? <span className="text-[10px] text-cyan-300">SAR-FUSED</span> : null}
+                      {cand.land_cover ? <span className="text-[10px] text-emerald-300">{cand.land_cover}</span> : null}
                       <span className="text-[10px] font-mono text-text-muted">
                         Drift: {cand.embedding_drift?.toFixed(2)}
                       </span>

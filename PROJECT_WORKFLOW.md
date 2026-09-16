@@ -293,6 +293,21 @@ The implemented API groups are:
 
 Interactive API documentation is available at `/docs` when the backend is running.
 
+## Innovation Layer (v0.2) architecture
+
+The SAR branch stores Sentinel-1 VV/VH observations in the dedicated
+`sar_tiles` table and computes native-resolution backscatter-delta features.
+Optical and SAR evidence are matched at the stable physical tile footprint;
+monthly mosaics retain period metadata and do not receive fabricated exact
+acquisition timestamps. Temporal signatures and velocity compare the
+resulting candidate scores over time, while preserving score provenance.
+
+Candidate review ordering can additionally use land-cover context, strategic
+AOI priority, similarity feedback, and a trained analyst active-learning
+probability. Priority and learned scores are ranking signals only. Spectral
+difference heatmaps and deterministic narratives are explanatory outputs, and
+the optional local Ollama Llama 3.2 1B brief is post-processing only.
+
 ## 14. Frontend flow
 
 The frontend in `frontend/` is a React + Vite app that connects to the backend.

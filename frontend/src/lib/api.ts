@@ -98,4 +98,12 @@ export const api = {
     }
     return response.blob();
   },
+
+  /** Innovation endpoints are optional and additive to the original API. */
+  sarObservations: <T = unknown>(tileId?: string): Promise<T> =>
+    request<T>('/sar/observations' + (tileId ? `?tile_id=${encodeURIComponent(tileId)}` : '')),
+  priorityChanges: <T = unknown>(limit = 24, aoiId?: string): Promise<T> =>
+    api.get<T>('/changes/priority', { limit, aoi_id: aoiId }),
+  aoiNarrative: <T = unknown>(aoiId: string): Promise<T> =>
+    request<T>(`/aois/${encodeURIComponent(aoiId)}/narrative`),
 };

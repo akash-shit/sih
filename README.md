@@ -24,6 +24,30 @@ It is designed to work fully offline once the RemoteCLIP checkpoint is staged lo
 10. Supports semantic text search and cluster-based “similar site” discovery.
 11. Exposes the pipeline through both CLI commands and an API layer.
 
+## Innovation Layer (v0.2)
+
+Sentinel-1 support is an independent backscatter-delta branch for VV/VH GRD
+and monthly mosaic products, not interferometric coherence. It preserves SAR
+native resolution and uses physical tile correspondence for optional fusion;
+real-data value-range and co-registration validation remains required.
+
+Land-cover-aware scoring is a heuristic context classifier based on NDVI/NDWI,
+and strategic priority uses analyst-configured AOI tiers, optional GeoJSON
+zones, and proximity to confirmed hotspots. These signals reorder or explain
+candidates; they never auto-confirm or hide analyst evidence.
+
+The review queue exposes similarity feedback and an optional active-learning
+reranker once enough confirm/reject decisions exist. Spectral difference
+heatmaps use per-band percentile normalization and degrade to unavailable
+when band metadata is ambiguous.
+
+Per-AOI deterministic narratives remain the guaranteed explanation. An
+optional local Llama 3.2 1B model through Ollama can produce a separate brief;
+it is disabled by default, makes no remote calls, and falls back safely.
+
+Useful commands include `python -m app.cli ingest-sar manifest.json`,
+`python -m app.cli sar-stats`, and `python -m app.cli backfill-landcover`.
+
 ## Core project structure
 
 ```text

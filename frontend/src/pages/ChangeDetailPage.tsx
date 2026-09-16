@@ -39,6 +39,7 @@ export const ChangeDetailPage: React.FC = () => {
   const [activeModal, setActiveModal] = useState<'CONFIRM' | 'REJECT' | null>(null);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [isCompareFullscreen, setIsCompareFullscreen] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   useEffect(() => {
     if (!isCompareFullscreen) return;
@@ -160,6 +161,16 @@ export const ChangeDetailPage: React.FC = () => {
                 onFullscreen={() => setIsCompareFullscreen(true)}
               />
             </GlassPanel>
+            {change.heatmap_spectral_url && (
+              <div className="flex justify-center">
+                <button type="button" onClick={() => setShowHeatmap((visible) => !visible)} className="px-3 py-1.5 rounded-lg border border-white/[0.1] text-xs font-mono text-text-secondary hover:text-text-primary">
+                  {showHeatmap ? 'Hide spectral heatmap' : 'Show spectral heatmap'}
+                </button>
+              </div>
+            )}
+            {showHeatmap && change.heatmap_spectral_url && (
+              <img src={change.heatmap_spectral_url} alt="Explainable spectral difference heatmap" className="max-w-4xl mx-auto rounded-xl border border-rose-400/30" />
+            )}
 
             {isCompareFullscreen && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-space-950/90 p-3 backdrop-blur-sm">
