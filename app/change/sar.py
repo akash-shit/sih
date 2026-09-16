@@ -8,6 +8,8 @@ from pathlib import Path
 import json
 import numpy as np
 
+from app.geospatial.sar_features import SarFeatures, sar_change_score as _canonical_sar_change_score
+
 @dataclass(frozen=True)
 class SARObservation:
     path: str
@@ -25,9 +27,18 @@ def _normalised_delta(before: np.ndarray, after: np.ndarray) -> float:
     # bounded for scoring after normalisation.
     return float(np.clip(np.nanmedian(np.abs(a[mask] - b[mask])) / 10.0, 0.0, 1.0))
 
-def sar_change_score(vv_before, vv_after, vh_before, vh_after, diff_before=None, diff_after=None) -> float:
-    """Return a [0,1] SAR change score from VV/VH and optional difference signal."""
-    vv = _normalised_delta(vv_before, vv_after)
+def sar_change_score(before, after, vh_before=None, vh_after=None, diff_before=None, diff_after=None) -> float:
+    """Compatibility wrapper around the canonical SAR feature scorer.
+
+    The real pipeline uses SarFeatures instances from app.geospatial.sar_features;
+    this adapter preserves the legacy positional call pattern used elsewhere in the
+    codebase while routing the real scoring through the single authoritative implementation.
+    """
+    if isinstance(before, SarFeatures) and isinstance(after, SarFeatures):
+        return float(_canonical_sar_change_score(before, after))
+    if vh_before is None or vh_after is None:
+        raise TypeError("Legacy SAR score calls require VV/VH arrays for both before and after values")
+    vv = _normalised_delta(before, after)
     vh = _normalised_delta(vh_before, vh_after)
     difference_signal = _normalised_delta(diff_before, diff_after) if diff_before is not None and diff_after is not None else 0.0
     return float(np.clip(0.45 * vv + 0.35 * vh + 0.20 * difference_signal, 0.0, 1.0))

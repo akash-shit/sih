@@ -787,8 +787,8 @@ def recompute_priority():
 		rows = conn.execute("SELECT cc.*, t.minlat, t.maxlat, t.minlon, t.maxlon, a.* FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after LEFT JOIN aois a ON a.aoi_id=t.aoi_id").fetchall()
 		hotspots = [dict(row) for row in conn.execute("SELECT cc.*, t.minlat, t.maxlat, t.minlon, t.maxlon FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after JOIN audit_log al ON al.candidate_id=cc.candidate_id WHERE lower(al.analyst_decision)='confirm'").fetchall()]
 		for row in rows:
-			score = compute_priority(row, row, hotspots)
-			conn.execute("UPDATE change_candidates SET priority_score=?, priority_reasons=? WHERE candidate_id=?", (score, row["priority_reasons"], row["candidate_id"]))
+			score, reasons = compute_priority(row, row, hotspots)
+			conn.execute("UPDATE change_candidates SET priority_score=?, priority_reasons=? WHERE candidate_id=?", (score, json.dumps(reasons), row["candidate_id"]))
 			updated += 1
 	return {"updated": updated}
 

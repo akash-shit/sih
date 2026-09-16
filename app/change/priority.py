@@ -49,12 +49,19 @@ def _inside(point: tuple[float, float], geojson: str | dict) -> bool:
         return False
 
 
-def compute_priority(candidate_row, aoi_row, confirmed_hotspots) -> float:
+def compute_priority(candidate_row, aoi_row, confirmed_hotspots) -> tuple[float, list[str]]:
     score = 0.0
-    reasons = []
+    reasons: list[str] = []
+    seen: set[str] = set()
+
+    def add_reason(reason: str):
+        if reason and reason not in seen:
+            seen.add(reason)
+            reasons.append(reason)
+
     tier = (aoi_row.get("priority_tier") if hasattr(aoi_row, "get") else None) or PRIORITY_ZONE_DEFAULT_TIER
     score += {"high": 0.5, "medium": 0.3, "low": 0.1}.get(tier, 0.3)
-    reasons.append("aoi_tier")
+    add_reason("aoi_tier")
     center = _center(candidate_row)
     for hotspot in confirmed_hotspots or []:
         hotspot_point = _center(hotspot) or _point(hotspot)
@@ -62,19 +69,13 @@ def compute_priority(candidate_row, aoi_row, confirmed_hotspots) -> float:
             distance = haversine_km(center, hotspot_point)
             score += 0.4 * math.exp(-distance / PRIORITY_DISTANCE_DECAY_KM)
             candidate_id = hotspot.get("candidate_id", "") if hasattr(hotspot, "get") else ""
-            reasons.append(f"near_confirmed_hotspot:{candidate_id}:{distance:.0f}km")
+            add_reason(f"near_confirmed_hotspot:{candidate_id}:{distance:.0f}km")
     polygon = aoi_row.get("priority_geojson") if hasattr(aoi_row, "get") else None
     if center and polygon and _inside(center, polygon):
         score += 0.3
-        reasons.append("inside_priority_zone")
+        add_reason("inside_priority_zone")
     value = max(0.0, min(1.0, score))
-    if hasattr(candidate_row, "keys"):
-        try:
-            candidate_row["priority_score"] = value
-            candidate_row["priority_reasons"] = json.dumps(reasons)
-        except TypeError:
-            pass
-    return value
+    return value, reasons
 
 
 def strategic_priority(change_score: float, **kwargs):

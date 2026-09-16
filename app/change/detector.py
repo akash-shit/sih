@@ -24,8 +24,8 @@ from app.geospatial import catalog_db as db
 from app.geospatial.rendering import has_valid_multispectral_data
 from app.index.vector_index import VectorIndex
 from app.change.adaptive import adaptive_score, infer_land_cover, strategic_priority
-from app.change.sar import fuse_modalities, sar_change_score
-from app.geospatial.sar_features import SarFeatures, sar_change_score
+from app.change.sar import fuse_modalities
+from app.geospatial.sar_features import SarFeatures, find_matching_sar_pair, sar_change_score
 
 
 @dataclass
@@ -137,9 +137,12 @@ def analyze_tile_timeline(tile_id: str, threshold: float = DEFAULT_CHANGE_THRESH
     index = VectorIndex()
     candidates = []
     for i in range(len(history) - 1):
-        if not index.has_vector(history[i]["vector_id"]) or not index.has_vector(history[i + 1]["vector_id"]):
+        before_row = history[i]
+        after_row = history[i + 1]
+        if not index.has_vector(before_row["vector_id"]) or not index.has_vector(after_row["vector_id"]):
             continue
-        candidates.append(analyze_tile_pair(history[i], history[i + 1], threshold))
+        sar_pair = find_matching_sar_pair(before_row, after_row)
+        candidates.append(analyze_tile_pair(before_row, after_row, threshold, sar_pair=sar_pair))
     return candidates
 
 
@@ -190,18 +193,15 @@ def run_change_detection_for_all_tiles(threshold: float = DEFAULT_CHANGE_THRESHO
             after_tile = db.get_tile(c.vector_id_after)
             cover = infer_land_cover(after_tile["ndvi_mean"], after_tile["ndwi_mean"]) if after_tile else "unknown"
             score = adaptive_score(c.embedding_drift, c.spectral_delta, land_cover=cover)
-            sar_rows = db.list_sar_observations(c.tile_id)
-            sar_before = next((r for r in sar_rows if r["acquisition_date"] == c.date_before), None)
-            sar_after = next((r for r in sar_rows if r["acquisition_date"] == c.date_after), None)
+            before_tile = db.get_tile(c.vector_id_before)
+            after_tile = db.get_tile(c.vector_id_after)
+            sar_pair = find_matching_sar_pair(before_tile, after_tile) if before_tile and after_tile else None
             sar_score = None
             modality = "optical"
             fused_score = score
             sar_only = 0
-            if sar_before and sar_after and sar_before["vv_mean"] is not None and sar_after["vv_mean"] is not None:
-                sar_score = sar_change_score(
-                    np.asarray([sar_before["vv_mean"]]), np.asarray([sar_after["vv_mean"]]),
-                    np.asarray([sar_before["vh_mean"] or 0]), np.asarray([sar_after["vh_mean"] or 0]),
-                )
+            if sar_pair and all(item.valid_pixels >= SAR_MIN_VALID_PIXELS for item in sar_pair):
+                sar_score = sar_change_score(*sar_pair)
                 fused_score = fuse_modalities(score, sar_score)
                 modality = "optical+sar"
             priority = strategic_priority(fused_score, confidence=0.5)
