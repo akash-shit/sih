@@ -45,8 +45,20 @@ Per-AOI deterministic narratives remain the guaranteed explanation. An
 optional local Llama 3.2 1B model through Ollama can produce a separate brief;
 it is disabled by default, makes no remote calls, and falls back safely.
 
-Useful commands include `python -m app.cli ingest-sar manifest.json`,
-`python -m app.cli sar-stats`, and `python -m app.cli backfill-landcover`.
+SAR ingestion is raster-first and writes to the canonical `sar_tiles` table:
+
+```text
+python -m app.cli ingest-sar <vv-vh.tif> --tile-id T123 \
+  --product-type GRD --acquisition-date 2025-06-10
+python -m app.cli sar-stats
+```
+
+Monthly mosaics use `--product-type IW_MONTHLY_MOSAIC`,
+`--period-start`, and `--period-end`. The command computes VV/VH dB features
+from bands 1 and 2; manifest-provided scalar means are not accepted. Automatic
+AOI onboarding currently covers Sentinel-2 scene inputs, so Sentinel-1 files
+must be registered with `ingest-sar` (or the equivalent API endpoint) until
+folder discovery is added.
 
 ## Core project structure
 

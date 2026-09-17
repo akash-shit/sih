@@ -121,7 +121,8 @@ CREATE TABLE IF NOT EXISTS sar_tiles (
     period_start TEXT, period_end TEXT, acquisition_datetime TEXT,
     tile_path TEXT, vv_mean_db REAL, vh_mean_db REAL,
     vv_std_db REAL, vh_std_db REAL, vv_minus_vh_db REAL, valid_pixels REAL,
-    speckle_filter_applied INTEGER DEFAULT 0, processing_version TEXT
+    speckle_filter_applied INTEGER DEFAULT 0, processing_version TEXT,
+    metadata TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sar_tile_id ON sar_tiles(tile_id);
 
@@ -198,6 +199,7 @@ def init_db():
         _ensure_column(conn, "change_candidates", "heatmap_spectral", "TEXT")
         _ensure_column(conn, "change_candidates", "heatmap_attention", "TEXT")
         _ensure_column(conn, "change_candidates", "llm_narrative", "TEXT")
+        _ensure_column(conn, "sar_tiles", "metadata", "TEXT")
         # These indexes reference columns that may have just been added
         # by the migration above, so they can only be created AFTER it --
         # unlike the rest of SCHEMA, they can't live in the initial
@@ -209,7 +211,11 @@ def init_db():
 def register_sar_observation(*, tile_id: str | None, scene_path: str, acquisition_date: str,
                              vv_mean: float | None = None, vh_mean: float | None = None,
                              valid_fraction: float | None = None, metadata: dict | None = None) -> int:
-    """Persist SAR provenance without altering optical scene/tile records."""
+    """Deprecated compatibility writer for pre-raster API clients.
+
+    New ingestion must call :func:`register_sar_tile` with features produced
+    by ``compute_sar_features``; fusion never reads this legacy table.
+    """
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO sar_observations
@@ -226,6 +232,52 @@ def list_sar_observations(tile_id: str | None = None) -> list[sqlite3.Row]:
         if tile_id:
             return conn.execute("SELECT * FROM sar_observations WHERE tile_id=? ORDER BY acquisition_date", (tile_id,)).fetchall()
         return conn.execute("SELECT * FROM sar_observations ORDER BY acquisition_date").fetchall()
+
+
+def register_sar_tile(*, tile_id: str, tile_path: str, features, product_type: str = "GRD",
+                      sensor: str = "SENTINEL1", aoi_id: int | None = None,
+                      period_start: str | None = None, period_end: str | None = None,
+                      acquisition_datetime: str | None = None,
+                      metadata: dict | None = None) -> int:
+    """Register features computed from the actual VV/VH raster in ``sar_tiles``.
+
+    ``features`` is the :class:`SarFeatures` returned by
+    ``compute_sar_features``.  Keeping this write in the catalog layer makes
+    raster ingestion and optical/SAR fusion use one canonical table.
+    """
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT sar_tile_id FROM sar_tiles WHERE tile_id=? AND tile_path=? "
+            "AND COALESCE(acquisition_datetime, period_start, '')=COALESCE(?, ?, '')",
+            (tile_id, tile_path, acquisition_datetime, period_start),
+        ).fetchone()
+        values = (
+            tile_id, aoi_id, sensor, product_type.upper(), period_start, period_end,
+            acquisition_datetime, tile_path, features.vv_mean_db, features.vh_mean_db,
+            features.vv_std_db, features.vh_std_db, features.vv_minus_vh_db,
+            features.valid_pixels, int(features.speckle_filter_applied),
+            PROCESSING_VERSION, json.dumps(metadata) if metadata else None,
+        )
+        if existing:
+            conn.execute(
+                """UPDATE sar_tiles SET tile_id=?, aoi_id=?, sensor=?, product_type=?,
+                   period_start=?, period_end=?, acquisition_datetime=?, tile_path=?,
+                   vv_mean_db=?, vh_mean_db=?, vv_std_db=?, vh_std_db=?,
+                   vv_minus_vh_db=?, valid_pixels=?, speckle_filter_applied=?,
+                   processing_version=?, metadata=? WHERE sar_tile_id=?""",
+                (*values, existing["sar_tile_id"]),
+            )
+            return existing["sar_tile_id"]
+        cur = conn.execute(
+            """INSERT INTO sar_tiles
+               (tile_id, aoi_id, sensor, product_type, period_start, period_end,
+                acquisition_datetime, tile_path, vv_mean_db, vh_mean_db, vv_std_db,
+                vh_std_db, vv_minus_vh_db, valid_pixels, speckle_filter_applied,
+                processing_version, metadata)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            values,
+        )
+        return cur.lastrowid
 
 
 # ---- AOI registry --------------------------------------------------------

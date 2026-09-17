@@ -71,25 +71,27 @@ def _row_to_features(row) -> SarFeatures:
 
 
 def _match_distance(row, target_date, product_type: str) -> int | None:
+    def value(name):
+        return row[name] if hasattr(row, "keys") else row.get(name)
     candidate_date = _coerce_date(target_date)
     if candidate_date is None:
         return None
     if product_type == "GRD":
-        observation_date = _coerce_date(row.get("acquisition_datetime") or row.get("period_start") or row.get("period_end"))
+        observation_date = _coerce_date(value("acquisition_datetime") or value("period_start") or value("period_end"))
         if observation_date is None:
             return None
         distance = abs((observation_date - candidate_date).days)
         return distance if distance <= SAR_OPTICAL_MATCH_TOLERANCE_DAYS else None
     if product_type == "IW_MONTHLY_MOSAIC":
-        period_start = _coerce_date(row.get("period_start") or row.get("acquisition_datetime"))
-        period_end = _coerce_date(row.get("period_end") or row.get("acquisition_datetime"))
+        period_start = _coerce_date(value("period_start") or value("acquisition_datetime"))
+        period_end = _coerce_date(value("period_end") or value("acquisition_datetime"))
         if period_start and period_end and period_start <= candidate_date <= period_end:
             return 0
         if period_start and period_start.year == candidate_date.year and period_start.month == candidate_date.month:
             return 0
         if period_end and period_end.year == candidate_date.year and period_end.month == candidate_date.month:
             return 0
-        observation_date = _coerce_date(row.get("acquisition_datetime"))
+        observation_date = _coerce_date(value("acquisition_datetime"))
         if observation_date and observation_date.year == candidate_date.year and observation_date.month == candidate_date.month:
             return 0
     return None
@@ -101,7 +103,7 @@ def _best_sar_match(rows, target_date) -> tuple[str, SarFeatures] | None:
         return None
     best: tuple[int, str, SarFeatures] | None = None
     for row in rows:
-        product_type = str(row.get("product_type") or "").upper()
+        product_type = str(row["product_type"] if hasattr(row, "keys") else row.get("product_type") or "").upper()
         if not product_type:
             continue
         distance = _match_distance(row, candidate_date, product_type)
@@ -217,4 +219,3 @@ def sar_change_score(before: SarFeatures, after: SarFeatures) -> float:
             None if before.vv_minus_vh_db is None or after.vv_minus_vh_db is None else after.vv_minus_vh_db - before.vv_minus_vh_db,
             SAR_DIFF_SCALE,
         ), 0.0, 1.0))
-

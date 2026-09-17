@@ -291,17 +291,41 @@ def cmd_calibrate(args):
 
 
 def cmd_ingest_sar(args):
-    from app.change.sar import ingest_sar_manifest, observation_from_raster
+    import rasterio
+    from app.geospatial.sar_features import compute_sar_features
     from app.geospatial import catalog_db as db
     db.init_db()
-    if args.raster and not args.date:
-        raise ValueError("--date is required with --raster")
-    observations = ([observation_from_raster(args.manifest, args.date)]
-                    if args.raster else ingest_sar_manifest(args.manifest))
-    ids = [db.register_sar_observation(tile_id=args.tile_id, scene_path=o.path,
-             acquisition_date=o.acquisition_date, vv_mean=o.vv_mean,
-             vh_mean=o.vh_mean, valid_fraction=o.valid_fraction) for o in observations]
-    print(json.dumps({"status": "ingested", "observations": len(ids), "sar_ids": ids}, indent=2))
+    path = Path(args.raster)
+    with rasterio.open(path) as source:
+        tags = {**source.tags(), **source.tags(1)}
+        if source.count >= 2:
+            tags.update(source.tags(2))
+    def first(*names):
+        return next((tags[name] for name in names if tags.get(name)), None)
+    tile_id = args.tile_id or first("TILE_ID", "TILEID") or path.stem
+    path_parts = {part.lower() for part in path.parts}
+    product_type = (args.product_type or first("PRODUCT_TYPE", "PRODUCT") or
+                    ("IW_MONTHLY_MOSAIC" if "mosaic" in path_parts or "monthly_mosaic" in path_parts else "GRD")).upper()
+    acquisition_datetime = args.acquisition_datetime or first("ACQUISITION_DATETIME", "DATETIME", "SENSING_TIME")
+    period_start = args.period_start or first("PERIOD_START", "START_DATE")
+    period_end = args.period_end or first("PERIOD_END", "END_DATE")
+    date = args.date or acquisition_datetime or period_start
+    if not date and product_type == "GRD":
+        raise ValueError("--date or raster acquisition metadata is required for GRD")
+    if product_type == "IW_MONTHLY_MOSAIC" and not (period_start and period_end):
+        raise ValueError("Monthly mosaic ingestion requires --period-start and --period-end (or raster tags)")
+    features = compute_sar_features(str(path))
+    metadata = {"source": "raster", "tags": tags, "date_inferred": args.date is None,
+                "tile_id_inferred": args.tile_id is None}
+    sar_id = db.register_sar_tile(
+        tile_id=tile_id, tile_path=str(path), features=features,
+        product_type=product_type, sensor=args.sensor, aoi_id=args.aoi_id,
+        period_start=period_start or date, period_end=period_end or date,
+        acquisition_datetime=acquisition_datetime or date, metadata=metadata,
+    )
+    print(json.dumps({"status": "ingested", "sar_tiles": 1, "sar_tile_id": sar_id,
+                      "tile_id": tile_id, "product_type": product_type,
+                      "features": features.__dict__}, indent=2))
 
 
 def cmd_sar_stats(args):
@@ -309,13 +333,12 @@ def cmd_sar_stats(args):
     db.init_db()
     with db.get_conn() as conn:
         rows = conn.execute("SELECT * FROM sar_tiles").fetchall()
-        observations = conn.execute("SELECT * FROM sar_observations").fetchall()
-    values = rows or observations
+    values = rows
     print(json.dumps({
         "observations": len(values),
-        "valid_pixels": [row["valid_pixels"] if "valid_pixels" in row.keys() else row["valid_fraction"] for row in values],
-        "vv_mean_db": [row["vv_mean_db"] if "vv_mean_db" in row.keys() else row["vv_mean"] for row in values],
-        "vh_mean_db": [row["vh_mean_db"] if "vh_mean_db" in row.keys() else row["vh_mean"] for row in values],
+        "valid_pixels": [row["valid_pixels"] for row in values],
+        "vv_mean_db": [row["vv_mean_db"] for row in values],
+        "vh_mean_db": [row["vh_mean_db"] for row in values],
     }, indent=2))
 
 
@@ -399,13 +422,19 @@ def main():
     p.add_argument("--classify", action="store_true", default=True, help="Run zero-shot change-type classification (default)")
     p.set_defaults(func=cmd_detect_changes)
 
-    p = sub.add_parser("ingest-sar", help="Register Sentinel-1 observations from a JSON manifest")
-    p.add_argument("manifest")
+    p = sub.add_parser("ingest-sar", help="Compute and register a Sentinel-1 VV/VH raster")
+    p.add_argument("raster", help="VV/VH GeoTIFF/COG (bands 1 and 2)")
     p.add_argument("--tile-id", default=None)
-    p.add_argument("--raster", action="store_true", help="Interpret manifest argument as VV/VH GeoTIFF")
-    p.add_argument("--date", default=None, help="Acquisition date for --raster")
+    p.add_argument("--date", "--acquisition-date", dest="date", default=None,
+                   help="Acquisition date, or infer from raster tags")
+    p.add_argument("--product-type", choices=("GRD", "IW_MONTHLY_MOSAIC"), default=None)
+    p.add_argument("--sensor", default="SENTINEL1")
+    p.add_argument("--aoi-id", type=int, default=None)
+    p.add_argument("--period-start", default=None)
+    p.add_argument("--period-end", default=None)
+    p.add_argument("--acquisition-datetime", default=None)
     p.set_defaults(func=cmd_ingest_sar)
-    p = sub.add_parser("sar-stats", help="Print coverage and value ranges for ingested SAR observations")
+    p = sub.add_parser("sar-stats", help="Print coverage and value ranges from sar_tiles")
     p.set_defaults(func=cmd_sar_stats)
     p = sub.add_parser("backfill-landcover", help="Populate heuristic land-cover labels for existing optical tiles")
     p.set_defaults(func=cmd_backfill_landcover)

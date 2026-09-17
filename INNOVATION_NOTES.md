@@ -9,6 +9,13 @@ This repository was extended only through the Phase 1 temporal-signature foundat
 - Added named temporal-signature config constants in [app/config.py](app/config.py).
 - Added additive DB columns for velocity and land-cover metadata via the existing migration helper in [app/geospatial/catalog_db.py](app/geospatial/catalog_db.py).
 - Added a focused regression test in [tests/test_velocity.py](tests/test_velocity.py).
+- SAR ingestion is now raster-first and canonical: `ingest-sar` and the SAR
+  API compute VV/VH dB features from the source raster and write `sar_tiles`.
+  The older `sar_observations` table is retained only for database/API
+  compatibility and is not a fusion or statistics data source; it was a dead
+  parallel store.
+- `app/change/reranker.py` remains as a documented legacy compatibility helper;
+  production review ordering is implemented in [app/review/queue.py](app/review/queue.py).
 
 ## Not implemented in this pass
 

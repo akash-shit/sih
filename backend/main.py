@@ -79,9 +79,10 @@ class SARIngestRequest(BaseModel):
 	scene_path: str
 	acquisition_date: str
 	tile_id: str | None = None
-	vv_mean: float | None = None
-	vh_mean: float | None = None
-	valid_fraction: float = Field(default=1.0, ge=0, le=1)
+	product_type: Literal["GRD", "IW_MONTHLY_MOSAIC"] = "GRD"
+	period_start: str | None = None
+	period_end: str | None = None
+	aoi_id: int | None = None
 	metadata: dict | None = None
 
 
@@ -1089,12 +1090,22 @@ def onboard_job(job_id: str):
 
 @app.post("/sar/observations")
 def ingest_sar_observation(payload: SARIngestRequest):
-	"""Register a SAR observation independently of optical ingestion."""
+	"""Compute and register a Sentinel-1 raster in the canonical SAR tile store."""
+	from app.geospatial.sar_features import compute_sar_features
 	db.init_db()
-	sar_id = db.register_sar_observation(tile_id=payload.tile_id, scene_path=payload.scene_path,
-		acquisition_date=payload.acquisition_date, vv_mean=payload.vv_mean,
-		vh_mean=payload.vh_mean, valid_fraction=payload.valid_fraction, metadata=payload.metadata)
-	return {"ok": True, "sar_id": sar_id}
+	features = compute_sar_features(payload.scene_path)
+	sar_id = db.register_sar_tile(
+		tile_id=payload.tile_id or Path(payload.scene_path).stem,
+		tile_path=payload.scene_path,
+		features=features,
+		product_type=payload.product_type,
+		aoi_id=payload.aoi_id,
+		period_start=payload.period_start or payload.acquisition_date,
+		period_end=payload.period_end or payload.acquisition_date,
+		acquisition_datetime=payload.acquisition_date,
+		metadata=payload.metadata,
+	)
+	return {"ok": True, "sar_tile_id": sar_id, "features": features.__dict__}
 
 
 @app.get("/sar/observations")

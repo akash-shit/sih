@@ -308,6 +308,17 @@ probability. Priority and learned scores are ranking signals only. Spectral
 difference heatmaps and deterministic narratives are explanatory outputs, and
 the optional local Ollama Llama 3.2 1B brief is post-processing only.
 
+SAR CLI ingestion is raster-first: `ingest-sar` reads VV/VH bands, runs
+`compute_sar_features` on the source raster, and registers the result through
+`register_sar_tile` in `sar_tiles`. Product type and acquisition/period
+metadata may be supplied with flags or inferred from GeoTIFF tags (and the
+filename for monthly mosaics). The former JSON `sar_observations` path is
+retained only for API compatibility and is not used for fusion or CLI stats.
+The review queue displays a strategic-priority badge when a priority score is
+available: high (>=0.75), medium (>=0.45), or low. `app/change/reranker.py`
+is a legacy offline compatibility helper; production learned ordering lives
+in `app/review/queue.py`.
+
 ## 14. Frontend flow
 
 The frontend in `frontend/` is a React + Vite app that connects to the backend.

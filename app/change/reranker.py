@@ -1,4 +1,9 @@
-"""Active-learning review queue reranking."""
+"""Legacy active-learning reranker.
+
+The review queue now owns ranking and this module is not imported by the
+production API.  It remains as a compatibility helper for offline callers;
+new code should use ``app.review.queue.get_review_queue(sort="learned")``.
+"""
 from .adaptive import active_learning_probability
 
 def rerank_candidates(candidates: list[dict]) -> list[dict]:

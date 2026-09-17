@@ -19,6 +19,21 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+const priorityBadge = (score: number | null | undefined) => {
+  if (score == null || !Number.isFinite(score)) return null;
+  const tier = score >= 0.75 ? 'HIGH' : score >= 0.45 ? 'MEDIUM' : 'LOW';
+  const styles = tier === 'HIGH'
+    ? 'text-rose-300 bg-rose-500/10 border-rose-500/30'
+    : tier === 'MEDIUM'
+      ? 'text-amber-300 bg-amber-500/10 border-amber-500/30'
+      : 'text-sky-300 bg-sky-500/10 border-sky-500/30';
+  return (
+    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${styles}`} title={`Strategic priority: ${score.toFixed(2)}`}>
+      Priority {tier} · {score.toFixed(2)}
+    </span>
+  );
+};
+
 export const ReviewQueuePage: React.FC = () => {
   const [sort, setSort] = useState<'combined_score' | 'priority' | 'learned'>('combined_score');
   const [activeTab, setActiveTab] = useState<'ALL' | 'OPEN' | 'CONFIRMED' | 'REJECTED' | 'SUPPRESSED' | 'audit'>('OPEN');
@@ -186,6 +201,7 @@ export const ReviewQueuePage: React.FC = () => {
 
                     <div className="flex items-center justify-between pt-1 border-t border-white/[0.06]">
                       <ChangeTypeBadge type={cand.change_type} size="sm" />
+                      {priorityBadge(cand.priority_score)}
                       {cand.sar_only ? <span className="text-[10px] text-amber-300">SAR-ONLY</span> : cand.fused_score != null ? <span className="text-[10px] text-cyan-300">SAR-FUSED</span> : null}
                       {cand.land_cover ? <span className="text-[10px] text-emerald-300">{cand.land_cover}</span> : null}
                       <span className="text-[10px] font-mono text-text-muted">
@@ -209,6 +225,7 @@ export const ReviewQueuePage: React.FC = () => {
                           Candidate #{selectedCandidate.candidate_id}
                         </h2>
                         <ChangeTypeBadge type={selectedCandidate.change_type} />
+                        {priorityBadge(selectedCandidate.priority_score)}
                       </div>
                       <p className="text-xs font-mono text-text-muted mt-0.5">
                         Tile ID: {selectedCandidate.tile_id} · AOI: {selectedCandidate.aoi_name || selectedCandidate.aoi_id}
