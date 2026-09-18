@@ -346,10 +346,19 @@ class TextSearchRequest(BaseModel):
 app = FastAPI(title="Satellite Intelligence API")
 default_origins = (
     "http://localhost:5173,http://127.0.0.1:5173,"
-    "http://localhost:4173,http://127.0.0.1:4173"
+    "http://localhost:4173,http://127.0.0.1:4173,"
+    "http://localhost:4174,http://127.0.0.1:4174,"
+    "http://0.0.0.0:4173,http://0.0.0.0:4174"
 )
 origins = [item.strip() for item in os.getenv("CORS_ALLOWED_ORIGINS", default_origins).split(",") if item.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+	CORSMiddleware,
+	allow_origins=origins,
+	allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
+	allow_credentials=True,
+	allow_methods=["*"],
+	allow_headers=["*"],
+)
 app.mount("/generated", StaticFiles(directory=GENERATED_DIR, check_dir=False), name="generated")
 db.init_db()
 
