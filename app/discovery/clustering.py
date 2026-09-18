@@ -38,19 +38,22 @@ def cluster_all_tiles(min_cluster_size: int = 3, fallback_k: int = 3) -> dict[in
         return {}
 
     index = VectorIndex()
-    vectors = np.stack([index.get_vector(vid) for vid in all_vector_ids])
+    indexed_vector_ids = [vid for vid in all_vector_ids if index.has_vector(vid)]
+    if len(indexed_vector_ids) < 2:
+        return {}
+    vectors = np.stack([index.get_vector(vid) for vid in indexed_vector_ids])
 
-    if len(all_vector_ids) >= min_cluster_size * 2:
+    if len(indexed_vector_ids) >= min_cluster_size * 2:
         clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, metric="euclidean")
         labels = clusterer.fit_predict(vectors)
     else:
         # Small demo AOIs won't have enough tiles for HDBSCAN's density
         # requirement -- KMeans with a small k keeps discovery testable
         # at prototype scale without changing the downstream interface.
-        k = min(fallback_k, len(all_vector_ids))
+        k = min(fallback_k, len(indexed_vector_ids))
         labels = KMeans(n_clusters=k, n_init=10, random_state=0).fit_predict(vectors)
 
-    assignment = {vid: int(label) for vid, label in zip(all_vector_ids, labels)}
+    assignment = {vid: int(label) for vid, label in zip(indexed_vector_ids, labels)}
     for vid, cluster_id in assignment.items():
         db.set_tile_cluster(vid, cluster_id)
     return assignment

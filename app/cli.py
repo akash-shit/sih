@@ -264,9 +264,32 @@ def cmd_stats(args):
 
 
 def cmd_add_aoi(args):
-    from app.pipeline.onboard_aoi import onboard_aoi, print_onboard_report
+    from app.pipeline.onboard_aoi import onboard_aoi, onboard_aoi_sar, print_onboard_report, print_sar_onboard_report
     report = onboard_aoi(args.aoi_name, args.source_folder, sensor=args.sensor)
     print_onboard_report(report)
+    if args.sar_folder:
+        sar_report = onboard_aoi_sar(args.aoi_name, args.sar_folder)
+        print_sar_onboard_report(sar_report)
+
+
+def cmd_add_aoi_sar(args):
+    from app.pipeline.onboard_aoi import onboard_aoi_sar, print_sar_onboard_report
+    print_sar_onboard_report(onboard_aoi_sar(args.aoi_name, args.sar_folder))
+
+
+def cmd_run_aoi(args):
+    """Run the complete optical AOI workflow from raw scenes to review data."""
+    from app.discovery.clustering import cluster_all_tiles
+    from app.change.detector import run_change_detection_for_all_tiles
+    from app.pipeline.onboard_aoi import onboard_aoi, print_onboard_report
+
+    report = onboard_aoi(args.aoi_name, args.source_folder, sensor=args.sensor)
+    print_onboard_report(report)
+    assignment = cluster_all_tiles(min_cluster_size=args.min_cluster_size)
+    n_clusters = len(set(assignment.values()) - {-1})
+    promoted_ids = run_change_detection_for_all_tiles(threshold=args.threshold)
+    print(f"\nClusters: {n_clusters} | promoted change candidates: {len(promoted_ids)}")
+    cmd_stats(args)
 
 
 def cmd_inspect_zip(args):
@@ -291,40 +314,26 @@ def cmd_calibrate(args):
 
 
 def cmd_ingest_sar(args):
-    import rasterio
     from app.geospatial.sar_features import compute_sar_features
     from app.geospatial import catalog_db as db
+    from app.pipeline.onboard_aoi import infer_sar_metadata
     db.init_db()
     path = Path(args.raster)
-    with rasterio.open(path) as source:
-        tags = {**source.tags(), **source.tags(1)}
-        if source.count >= 2:
-            tags.update(source.tags(2))
-    def first(*names):
-        return next((tags[name] for name in names if tags.get(name)), None)
-    tile_id = args.tile_id or first("TILE_ID", "TILEID") or path.stem
-    path_parts = {part.lower() for part in path.parts}
-    product_type = (args.product_type or first("PRODUCT_TYPE", "PRODUCT") or
-                    ("IW_MONTHLY_MOSAIC" if "mosaic" in path_parts or "monthly_mosaic" in path_parts else "GRD")).upper()
-    acquisition_datetime = args.acquisition_datetime or first("ACQUISITION_DATETIME", "DATETIME", "SENSING_TIME")
-    period_start = args.period_start or first("PERIOD_START", "START_DATE")
-    period_end = args.period_end or first("PERIOD_END", "END_DATE")
-    date = args.date or acquisition_datetime or period_start
-    if not date and product_type == "GRD":
-        raise ValueError("--date or raster acquisition metadata is required for GRD")
-    if product_type == "IW_MONTHLY_MOSAIC" and not (period_start and period_end):
-        raise ValueError("Monthly mosaic ingestion requires --period-start and --period-end (or raster tags)")
+    metadata = infer_sar_metadata(path, product_type=args.product_type, date=args.date,
+                                  period_start=args.period_start, period_end=args.period_end,
+                                  acquisition_datetime=args.acquisition_datetime)
+    tile_id = args.tile_id or metadata["tags"].get("TILE_ID") or metadata["tags"].get("TILEID") or path.stem
     features = compute_sar_features(str(path))
-    metadata = {"source": "raster", "tags": tags, "date_inferred": args.date is None,
+    source_metadata = {"source": "raster", "tags": metadata["tags"], "date_inferred": args.date is None,
                 "tile_id_inferred": args.tile_id is None}
     sar_id = db.register_sar_tile(
         tile_id=tile_id, tile_path=str(path), features=features,
-        product_type=product_type, sensor=args.sensor, aoi_id=args.aoi_id,
-        period_start=period_start or date, period_end=period_end or date,
-        acquisition_datetime=acquisition_datetime or date, metadata=metadata,
+        product_type=metadata["product_type"], sensor=args.sensor, aoi_id=args.aoi_id,
+        period_start=metadata["period_start"], period_end=metadata["period_end"],
+        acquisition_datetime=metadata["acquisition_datetime"], metadata=source_metadata,
     )
     print(json.dumps({"status": "ingested", "sar_tiles": 1, "sar_tile_id": sar_id,
-                      "tile_id": tile_id, "product_type": product_type,
+                      "tile_id": tile_id, "product_type": metadata["product_type"],
                       "features": features.__dict__}, indent=2))
 
 
@@ -351,6 +360,105 @@ def cmd_backfill_landcover(args):
         for row in rows:
             conn.execute("UPDATE tiles SET land_cover=? WHERE vector_id=?", (classify_land_cover(row["ndvi_mean"], row["ndwi_mean"]), row["vector_id"]))
     print(json.dumps({"updated": len(rows)}))
+
+
+def _pipeline_aoi_folders() -> list[tuple[str, Path, Path | None]]:
+    from app.config import RAW_DIR
+
+    optical_root = RAW_DIR / "sentinel-2"
+    sar_root = RAW_DIR / "sentinel-1"
+    if optical_root.is_dir():
+        optical = {path.name: path for path in optical_root.iterdir() if path.is_dir()}
+    else:
+        optical = {path.name: path for path in RAW_DIR.iterdir() if path.is_dir() and path.name not in {"sentinel-1", "sentinel-2"}}
+    return [(name, folder, sar_root / name if (sar_root / name).is_dir() else None)
+            for name, folder in sorted(optical.items())]
+
+
+def _recompute_priority_direct() -> int:
+    from app.change.priority import compute_priority
+    from app.geospatial import catalog_db as db
+
+    updated = 0
+    with db.get_conn() as conn:
+        rows = conn.execute("SELECT cc.*, t.minlat, t.maxlat, t.minlon, t.maxlon, a.* FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after LEFT JOIN aois a ON a.aoi_id=t.aoi_id").fetchall()
+        hotspots = [dict(row) for row in conn.execute("SELECT cc.*, t.minlat, t.maxlat, t.minlon, t.maxlon FROM change_candidates cc JOIN tiles t ON t.vector_id=cc.vector_id_after JOIN audit_log al ON al.candidate_id=cc.candidate_id WHERE lower(al.analyst_decision)='confirm'").fetchall()]
+        for row in rows:
+            score, reasons = compute_priority(row, row, hotspots)
+            conn.execute("UPDATE change_candidates SET priority_score=?, priority_reasons=? WHERE candidate_id=?", (score, json.dumps(reasons), row["candidate_id"]))
+            updated += 1
+    return updated
+
+
+def cmd_run_pipeline(args):
+    from app.config import DATA_DIR, RAW_DIR, validate_remoteclip_config
+    from app.geospatial import catalog_db as db
+    from app.pipeline.onboard_aoi import onboard_aoi, onboard_aoi_sar, print_onboard_report, print_sar_onboard_report
+    from app.review.queue import LEARNER_PATH
+
+    print("[1/9] Validating RemoteCLIP checkpoint")
+    validate_remoteclip_config()
+    folders = _pipeline_aoi_folders()
+    if not folders and not db.list_aois():
+        raise RuntimeError(f"No optical AOI folders found under {RAW_DIR / 'sentinel-2'}")
+
+    print("[2/9] Onboarding optical AOIs")
+    for aoi_name, optical_folder, _ in folders:
+        if db.get_aoi_by_name(aoi_name) is None:
+            report = onboard_aoi(aoi_name, str(optical_folder))
+            print_onboard_report(report)
+        else:
+            print(f"  {aoi_name}: already onboarded, skipping optical ingestion")
+
+    print("[3/9] Validating RemoteCLIP against real indexed tiles")
+    cmd_validate_remoteclip(argparse.Namespace())
+
+    print("[4/9] Onboarding SAR AOIs")
+    for aoi_name, _, sar_folder in folders:
+        if sar_folder:
+            aoi = db.get_aoi_by_name(aoi_name)
+            with db.get_conn() as conn:
+                existing_sar = conn.execute("SELECT COUNT(*) FROM sar_tiles WHERE aoi_id=?", (aoi["aoi_id"],)).fetchone()[0]
+            if existing_sar:
+                print(f"  {aoi_name}: {existing_sar} SAR tiles already registered, skipping re-ingestion")
+            else:
+                print_sar_onboard_report(onboard_aoi_sar(aoi_name, str(sar_folder)))
+
+    print("[5/9] Detecting changes")
+    cmd_detect_changes(argparse.Namespace(threshold=args.threshold, classify=True))
+    print("[6/9] Backfilling land cover")
+    cmd_backfill_landcover(argparse.Namespace())
+    print("[7/9] Calibrating from audit decisions")
+    calibration = __import__("app.change.calibration", fromlist=["calibrate_from_audit"]).calibrate_from_audit()
+    print(json.dumps(calibration, indent=2))
+    print("[8/9] Recomputing candidate priorities and clustering")
+    print(f"  priorities updated: {_recompute_priority_direct()}")
+    cmd_cluster(argparse.Namespace(min_cluster_size=args.min_cluster_size))
+
+    print("[9/9] Final pipeline summary")
+    db.init_db()
+    with db.get_conn() as conn:
+        aoi_rows = conn.execute("SELECT aoi_id, name FROM aois ORDER BY name").fetchall()
+        scene_counts = {row["aoi_id"]: conn.execute("SELECT COUNT(*) FROM scenes WHERE aoi_id=?", (row["aoi_id"],)).fetchone()[0] for row in aoi_rows}
+        tile_counts = {row["aoi_id"]: conn.execute("SELECT COUNT(*) FROM tiles WHERE aoi_id=?", (row["aoi_id"],)).fetchone()[0] for row in aoi_rows}
+        candidates = conn.execute("SELECT modality, COUNT(*) n FROM change_candidates GROUP BY modality").fetchall()
+        land_cover = conn.execute("SELECT COALESCE(land_cover, 'unknown') class, COUNT(*) n FROM tiles GROUP BY COALESCE(land_cover, 'unknown') ORDER BY class").fetchall()
+        sar_rows = conn.execute("SELECT product_type, vv_mean_db, vh_mean_db FROM sar_tiles").fetchall()
+    modality_counts = {"optical_only": 0, "fused": 0, "sar_only": 0}
+    for row in candidates:
+        key = {"optical": "optical_only", "optical_only": "optical_only", "optical+sar": "fused", "fused": "fused", "sar_only": "sar_only"}.get(row["modality"], row["modality"] or "unknown")
+        modality_counts[key] = modality_counts.get(key, 0) + row["n"]
+    print("AOIs:", ", ".join(f"{row['name']} ({scene_counts[row['aoi_id']]} scenes, {tile_counts[row['aoi_id']]} optical tiles)" for row in aoi_rows) or "none")
+    print(f"SAR tiles: {len(sar_rows)} | products: {dict((row['product_type'], sum(1 for item in sar_rows if item['product_type'] == row['product_type'])) for row in sar_rows)}")
+    for field in ("vv_mean_db", "vh_mean_db"):
+        values = [row[field] for row in sar_rows if row[field] is not None]
+        if values:
+            print(f"{field}: min={min(values):.2f} max={max(values):.2f} mean={sum(values) / len(values):.2f} dB | sanity={'OK' if min(values) >= -25 and max(values) <= 0 else 'FLAG'}")
+    total_candidates = sum(row["n"] for row in candidates)
+    print(f"Change candidates: {total_candidates} | modality: {modality_counts}")
+    print(f"Land cover: {dict((row['class'], row['n']) for row in land_cover)}")
+    print(f"Active-learning model: {'available' if LEARNER_PATH.exists() else 'not trained yet (insufficient analyst labels)'}")
+    print("Heatmaps: generated on first view in the UI.")
 
 
 def cmd_eval_report(args):
@@ -477,7 +585,26 @@ def main():
     p.add_argument("aoi_name", help="e.g. dholera, site2, site3")
     p.add_argument("source_folder", help="Folder containing .zip (Copernicus export) and/or .tif files")
     p.add_argument("--sensor", default="SENTINEL2_L2A")
+    p.add_argument("--sar-folder", default=None, help="Optional Sentinel-1 folder to attach after optical onboarding")
     p.set_defaults(func=cmd_add_aoi)
+
+    p = sub.add_parser("add-aoi-sar", help="Attach Sentinel-1 data to an already onboarded optical AOI")
+    p.add_argument("aoi_name")
+    p.add_argument("sar_folder")
+    p.set_defaults(func=cmd_add_aoi_sar)
+
+    p = sub.add_parser("run-pipeline", help="Run validation, onboarding, detection, enrichment, calibration, priority, and clustering")
+    p.add_argument("--threshold", type=float, default=0.22)
+    p.add_argument("--min-cluster-size", dest="min_cluster_size", type=int, default=3)
+    p.set_defaults(func=cmd_run_pipeline)
+
+    p = sub.add_parser("run-aoi", help="Onboard an AOI, cluster tiles, detect changes, and print stats")
+    p.add_argument("aoi_name", help="e.g. dholera, site2, site3")
+    p.add_argument("source_folder", help="Folder containing .zip (Copernicus export) and/or .tif files")
+    p.add_argument("--sensor", default="SENTINEL2_L2A")
+    p.add_argument("--threshold", type=float, default=0.22)
+    p.add_argument("--min-cluster-size", dest="min_cluster_size", type=int, default=3)
+    p.set_defaults(func=cmd_run_aoi)
 
     p = sub.add_parser("inspect-zip", help="Debug: show every file + parsed JSON inside one Copernicus zip")
     p.add_argument("zip_path")

@@ -8,9 +8,17 @@ from pathlib import Path
 
 # ---- Filesystem layout -----------------------------------------------
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
+DATA_DIR = Path(os.getenv("SATSEARCH_DATA_DIR", ROOT_DIR / "data")).expanduser().resolve()
 MODELS_DIR = ROOT_DIR / "models"
-RAW_DIR = DATA_DIR / "raw"          # original GeoTIFF / COG scenes land here
+_configured_raw_dir = os.getenv("SATSEARCH_RAW_DIR")
+_canonical_raw_dir = DATA_DIR / "raw"
+_legacy_raw_dir = DATA_DIR / "data" / "raw"
+if _configured_raw_dir:
+    RAW_DIR = Path(_configured_raw_dir).expanduser().resolve()
+elif (not _canonical_raw_dir.exists() or not any(_canonical_raw_dir.iterdir())) and _legacy_raw_dir.exists():
+    RAW_DIR = _legacy_raw_dir
+else:
+    RAW_DIR = _canonical_raw_dir  # original GeoTIFF / COG scenes land here
 TILES_DIR = DATA_DIR / "tiles"      # cropped, per-tile GeoTIFFs
 INDEX_DIR = DATA_DIR / "index"      # FAISS index files
 DB_PATH = DATA_DIR / "catalog.sqlite"

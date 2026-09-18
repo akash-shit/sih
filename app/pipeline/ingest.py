@@ -21,6 +21,7 @@ from app.geospatial.rendering import has_valid_multispectral_data
 from app.geospatial.tiler import tile_scene
 from app.geospatial.features import compute_tile_features
 from app.embeddings.clip_embedder import embed_image_tiles_batch
+from app.config import validate_remoteclip_config
 from app.index.vector_index import VectorIndex
 
 log = logging.getLogger("ingest")
@@ -33,6 +34,9 @@ def ingest_scene(scene_path: str, acquisition_date: str, sensor: str, aoi_id: in
     exactly as before for ad-hoc single-scene ingestion (e.g. from the
     CLI without an AOI concept); app/pipeline/onboard_aoi.py always
     passes all of them when onboarding a real, metadata-rich batch."""
+    # Validate the model before registering anything so a failed embedding
+    # setup cannot leave scenes and tiles without matching FAISS vectors.
+    validate_remoteclip_config()
     db.init_db()
 
     if db.scene_already_ingested(scene_path):
