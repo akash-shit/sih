@@ -1,7 +1,10 @@
 from datetime import datetime
 from types import SimpleNamespace
 
+from fastapi.testclient import TestClient
+
 from app.change.temporal_signature import _effective_score, compute_velocity, temporal_profile
+from backend.main import app
 
 
 def test_effective_score_prefers_fused_and_sar_only():
@@ -92,3 +95,32 @@ def test_temporal_profile_handles_two_rows_and_missing_vectors(monkeypatch):
 
     assert profile["long"] == profile["short"] == 0.4
     assert profile["score_sources"]["long"] == "combined_fallback_no_direct_comparison"
+
+
+def test_change_velocity_contract_exposes_series(monkeypatch):
+    client = TestClient(app)
+
+    fake_results = {
+        "T1": SimpleNamespace(
+            trend="steady_change",
+            latest_velocity=0.12,
+            acceleration=0.03,
+            series=[
+                {
+                    "date_pair": {"before": "2025-01-01", "after": "2025-01-15"},
+                    "velocity": 0.1,
+                    "source": "combined",
+                }
+            ],
+            velocities=[0.1, 0.2],
+        )
+    }
+    monkeypatch.setattr("backend.main.temporal_signature.velocity_for_all_tiles", lambda: fake_results)
+
+    response = client.get("/changes/velocity")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload and "series" in payload[0]
+    assert payload[0]["series"][0]["date_pair"]["before"] == "2025-01-01"
+    assert payload[0]["series"][0]["velocity"] == 0.1
+    assert payload[0]["series"][0]["source"] == "combined"

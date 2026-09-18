@@ -305,7 +305,10 @@ export const AOIDetailPage: React.FC = () => {
                     className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
                   >
                     <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 shrink-0 rounded-lg overflow-hidden border border-white/[0.08]">
+                      <div
+                        className="w-16 h-16 shrink-0 rounded-lg overflow-hidden border border-white/[0.08] cursor-pointer"
+                        onClick={() => scene.thumbnail_url && setZoomImage(scene.thumbnail_url)}
+                      >
                         <TileThumbnail
                           src={scene.thumbnail_url}
                           alt={scene.scene_id}

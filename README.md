@@ -137,6 +137,19 @@ pip install -r requirements.txt
 
 Stage the official OpenCLIP-format `RemoteCLIP-ViT-B-32.pt` checkpoint at `models/RemoteCLIP-ViT-B-32.pt`, or set `REMOTECLIP_CHECKPOINT_PATH` to an existing local copy. The application fails clearly when it is absent and never downloads model weights at runtime.
 
+### Optional local LLM brief backend
+
+The optional analyst brief feature does not read a model file from this project's `models/` folder. It expects a separate local Ollama server instead. Install Ollama, start it locally, and pull the model once:
+
+```bash
+ollama serve
+ollama pull llama3.2:1b
+```
+
+This application then calls the local Ollama endpoint at `OLLAMA_HOST` (default `http://localhost:11434`) and uses `OLLAMA_MODEL` (default `llama3.2:1b`). The model is managed by Ollama in its own cache, not in `models/`; a file such as `models/llama3.2:1b` or `models/TinyLlama...gguf` is not expected for the default architecture.
+
+If you prefer a direct GGUF file instead of Ollama, set `LLM_BACKEND=llama_cpp` and point `LLM_GGUF_PATH` to a local quantized model under `models/` (for example `models/TinyLlama-1.1B-Chat-v1.0.Q4_K_M.gguf`). The project does not bundle model weights; you download the file yourself. This is a separate alternate backend for the optional brief flow and is not required for the core RemoteCLIP pipeline.
+
 The application creates the following directories when it starts if they do not
 already exist: `data/raw`, `data/tiles`, `data/index`, and `models`.
 

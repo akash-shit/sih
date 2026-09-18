@@ -5,6 +5,7 @@ import uuid
 import csv
 import json
 import time
+import requests
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -343,7 +344,11 @@ class TextSearchRequest(BaseModel):
 
 
 app = FastAPI(title="Satellite Intelligence API")
-origins = [item.strip() for item in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if item.strip()]
+default_origins = (
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:4173,http://127.0.0.1:4173"
+)
+origins = [item.strip() for item in os.getenv("CORS_ALLOWED_ORIGINS", default_origins).split(",") if item.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.mount("/generated", StaticFiles(directory=GENERATED_DIR, check_dir=False), name="generated")
 db.init_db()
@@ -583,7 +588,7 @@ def _mosaic_rows(aoi_id: int, date: str) -> list:
 def timeline(aoi_id: str, request: Request):
 	aoi = aoi_row(aoi_id)
 	with db.get_conn() as conn:
-		scenes = conn.execute("SELECT * FROM scenes WHERE aoi_id=? ORDER BY acquisition_date", (aoi["aoi_id"],)).fetchall()
+		scenes = conn.execute("SELECT * FROM scenes WHERE aoi_id=? ORDER BY acquisition_date DESC", (aoi["aoi_id"],)).fetchall()
 	output = []
 	for scene in scenes:
 		with db.get_conn() as conn:
@@ -670,7 +675,8 @@ def change_velocity():
 			"trend": result.trend,
 			"latest_velocity": result.latest_velocity,
 			"acceleration": result.acceleration,
-			"velocities": result.series,
+			"series": result.series,
+			"velocities": result.velocities,
 		}
 		for tile_id, result in sorted(results.items(), key=lambda item: trend_order.get(item[1].trend, 4))
 	]
@@ -702,6 +708,35 @@ def tile_storyline(tile_id: str):
 		"velocities": velocity.velocities,
 		"stage": storyline.classify_stage(velocity.velocities, profile),
 	}
+
+
+@app.get("/system/llm-status")
+def system_llm_status():
+	from app.config import OLLAMA_HOST, OLLAMA_MODEL
+	available = False
+	model_pulled = False
+	try:
+		response = requests.get(f"{OLLAMA_HOST.rstrip('/')}/api/tags", timeout=2)
+		available = response.ok
+		if response.ok:
+			try:
+				payload = response.json() or {}
+				models = payload.get("models") or payload.get("data") or []
+				names = []
+				for item in models:
+					if isinstance(item, dict):
+						name = item.get("name") or item.get("model") or item.get("model_name")
+						if isinstance(name, str):
+							names.append(name)
+					elif isinstance(item, str):
+						names.append(item)
+				model_pulled = any(name == OLLAMA_MODEL or name.startswith(f"{OLLAMA_MODEL}:") for name in names)
+			except (TypeError, ValueError):
+				model_pulled = False
+	except requests.RequestException:
+		available = False
+		model_pulled = False
+	return {"available": available, "model_pulled": model_pulled}
 
 
 @app.post("/preview/image")

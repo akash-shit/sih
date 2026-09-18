@@ -150,7 +150,7 @@ export const ChangeDetailPage: React.FC = () => {
               Multi-Temporal Sensor Triptych Inspection
             </h2>
 
-            <GlassPanel className="relative w-full max-w-4xl mx-auto p-5">
+            <GlassPanel className="relative w-full max-w-2xl mx-auto p-5">
               <BeforeAfterCompare
                 beforeUrl={change.before_image_url}
                 afterUrl={change.after_image_url}
@@ -169,7 +169,7 @@ export const ChangeDetailPage: React.FC = () => {
               </div>
             )}
             {showHeatmap && change.heatmap_spectral_url && (
-              <img src={change.heatmap_spectral_url} alt="Explainable spectral difference heatmap" className="max-w-4xl mx-auto rounded-xl border border-rose-400/30" />
+              <img src={change.heatmap_spectral_url} alt="Explainable spectral difference heatmap" className="max-w-2xl mx-auto rounded-xl border border-rose-400/30" />
             )}
 
             {isCompareFullscreen && (

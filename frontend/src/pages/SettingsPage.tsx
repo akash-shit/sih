@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GlassPanel } from '@/components/common/GlassPanel';
 import { useStats } from '@/hooks/useStats';
 import { api } from '@/lib/api';
@@ -12,6 +12,21 @@ import {
 export const SettingsPage: React.FC = () => {
   const { data: stats } = useStats();
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [llmStatus, setLlmStatus] = useState<{ available: boolean; model_pulled: boolean } | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    api.get<{ available: boolean; model_pulled: boolean }>('/system/llm-status')
+      .then((result) => {
+        if (!ignore) setLlmStatus(result);
+      })
+      .catch(() => {
+        if (!ignore) setLlmStatus({ available: false, model_pulled: false });
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const techStack = [
     { name: 'React 18', type: 'Frontend Framework' },
@@ -76,6 +91,17 @@ export const SettingsPage: React.FC = () => {
               Enforced (No External LLM / Cloud Calls)
             </div>
             <p className="text-[10px] text-text-muted">Satisfies SIH 26227 offline mandate</p>
+          </div>
+
+          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-1">
+            <span className="text-[10px] uppercase text-text-muted">Optional LLM Brief Backend</span>
+            <div className={`font-semibold flex items-center gap-1.5 ${llmStatus?.available ? 'text-emerald-400' : 'text-amber-300'}`}>
+              {llmStatus?.available ? <CheckCircle size={14} /> : <Server size={14} />}
+              {llmStatus === null ? 'Checking…' : llmStatus.available ? 'Ollama reachable' : 'Unavailable'}
+            </div>
+            <p className="text-[10px] text-text-muted">
+              {llmStatus === null ? 'Detecting local LLM path' : (llmStatus.model_pulled ? 'Model is already pulled and ready.' : 'Model is not currently detected in the local Ollama registry.')}
+            </p>
           </div>
         </div>
       </GlassPanel>

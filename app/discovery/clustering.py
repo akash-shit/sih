@@ -19,12 +19,13 @@ import numpy as np
 import hdbscan
 from sklearn.cluster import KMeans
 
+from app.config import DISCOVERY_FALLBACK_K
 from app.geospatial import catalog_db as db
 from app.geospatial.rendering import has_valid_multispectral_data
 from app.index.vector_index import VectorIndex
 
 
-def cluster_all_tiles(min_cluster_size: int = 3, fallback_k: int = 3) -> dict[int, int]:
+def cluster_all_tiles(min_cluster_size: int = 3, fallback_k: int = DISCOVERY_FALLBACK_K) -> dict[int, int]:
     """Returns {vector_id: cluster_id}. cluster_id == -1 means HDBSCAN
     treated it as noise (a genuinely unusual tile) -- surfaced as-is
     rather than forced into a false grouping."""
@@ -48,9 +49,10 @@ def cluster_all_tiles(min_cluster_size: int = 3, fallback_k: int = 3) -> dict[in
         labels = clusterer.fit_predict(vectors)
     else:
         # Small demo AOIs won't have enough tiles for HDBSCAN's density
-        # requirement -- KMeans with a small k keeps discovery testable
-        # at prototype scale without changing the downstream interface.
-        k = min(fallback_k, len(indexed_vector_ids))
+        # requirement, but the fallback should still scale with the amount of
+        # real data instead of pinning to a tiny fixed cluster count.
+        data_bound = max(2, len(indexed_vector_ids) // 4)
+        k = max(2, min(max(2, fallback_k), data_bound))
         labels = KMeans(n_clusters=k, n_init=10, random_state=0).fit_predict(vectors)
 
     assignment = {vid: int(label) for vid, label in zip(indexed_vector_ids, labels)}

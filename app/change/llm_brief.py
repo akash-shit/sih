@@ -1,8 +1,56 @@
-"""Optional local Ollama analyst brief with deterministic guardrails."""
+"""Optional local analyst brief with deterministic guardrails.
+
+The default backend is Ollama, but a local llama.cpp GGUF path is also
+supported via LLM_BACKEND="llama_cpp" and LLM_GGUF_PATH. In either case,
+we keep the same guardrail behavior: only restate the supplied facts and
+never invent numbers or dates.
+"""
 import json
 import re
+from pathlib import Path
+
 import requests
-from app.config import OLLAMA_HOST, OLLAMA_MODEL
+
+from app.config import LLM_BACKEND, LLM_GGUF_PATH, OLLAMA_HOST, OLLAMA_MODEL
+
+
+def _safelist_numbers(candidate_facts: dict) -> set[str]:
+    return set(re.findall(r"-?\d+(?:\.\d+)?", json.dumps(candidate_facts, default=str)))
+
+
+def _generate_with_ollama(prompt: str) -> str | None:
+    response = requests.post(
+        f"{OLLAMA_HOST.rstrip('/')}/api/generate",
+        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+        timeout=7,
+    )
+    response.raise_for_status()
+    text = response.json().get("response")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    return text.strip()
+
+
+def _generate_with_llama_cpp(prompt: str) -> str | None:
+    try:
+        from llama_cpp import Llama
+    except ImportError:
+        return None
+
+    gguf_path = Path(LLM_GGUF_PATH)
+    if not gguf_path.is_file():
+        return None
+
+    model = Llama(model_path=str(gguf_path), n_ctx=2048, n_gpu_layers=0)
+    text = model.create_chat_completion(
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=256,
+        temperature=0.0,
+    )
+    content = text.get("choices", [{}])[0].get("message", {}).get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    return content.strip()
 
 
 def generate_llm_brief(candidate_facts: dict) -> str | None:
@@ -14,16 +62,15 @@ def generate_llm_brief(candidate_facts: dict) -> str | None:
         f"FACTS:\n{json.dumps(candidate_facts, sort_keys=True, default=str)}"
     )
     try:
-        response = requests.post(f"{OLLAMA_HOST.rstrip('/')}/api/generate", json={
-            "model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
-        }, timeout=7)
-        response.raise_for_status()
-        text = response.json().get("response")
+        if LLM_BACKEND == "llama_cpp":
+            text = _generate_with_llama_cpp(prompt)
+        else:
+            text = _generate_with_ollama(prompt)
         if not isinstance(text, str) or not text.strip():
             return None
-        allowed = set(re.findall(r"-?\d+(?:\.\d+)?", json.dumps(candidate_facts, default=str)))
+        allowed = _safelist_numbers(candidate_facts)
         if any(number not in allowed for number in re.findall(r"-?\d+(?:\.\d+)?", text)):
             return None
         return text.strip()
-    except (requests.RequestException, ValueError, TypeError, KeyError):
+    except (requests.RequestException, ValueError, TypeError, KeyError, OSError, RuntimeError):
         return None

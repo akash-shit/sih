@@ -84,6 +84,10 @@ VELOCITY_STABLE_THRESHOLD = 0.01
 VELOCITY_ACCEL_SLOPE_THRESHOLD = 0.0015
 VELOCITY_ACCEL_RATIO = 1.25
 
+# Discovery clustering fallback for small AOIs: only used when HDBSCAN is not
+# viable because the dataset is too small. This is not the main HDBSCAN path.
+DISCOVERY_FALLBACK_K = int(os.getenv("DISCOVERY_FALLBACK_K", "6"))
+
 # Storyline candidate interpretation thresholds
 STORYLINE_ONSET_THRESHOLD = 0.02
 STORYLINE_ACTIVE_THRESHOLD = 0.05
@@ -104,6 +108,8 @@ SAR_OPTICAL_MATCH_TOLERANCE_DAYS = 30
 SAR_APPLY_SPECKLE_FILTER = False
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
+LLM_BACKEND = os.getenv("LLM_BACKEND", "ollama").lower()
+LLM_GGUF_PATH = Path(os.getenv("LLM_GGUF_PATH", str(MODELS_DIR / "TinyLlama-1.1B-Chat-v1.0.Q4_K_M.gguf"))).expanduser().resolve()
 ACTIVE_LEARNING_MIN_EXAMPLES = 20
 ACTIVE_LEARNING_MIN_PER_CLASS = 5
 PRIORITY_DISTANCE_DECAY_KM = 25.0

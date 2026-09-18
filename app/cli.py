@@ -21,6 +21,8 @@ from pathlib import Path
 import sys
 import time
 
+from app.config import DISCOVERY_FALLBACK_K
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
@@ -87,7 +89,7 @@ def cmd_detect_changes(args):
 
 def cmd_cluster(args):
     from app.discovery.clustering import cluster_all_tiles
-    assignment = cluster_all_tiles(min_cluster_size=args.min_cluster_size)
+    assignment = cluster_all_tiles(min_cluster_size=args.min_cluster_size, fallback_k=args.fallback_k)
     n_clusters = len(set(assignment.values()) - {-1})
     n_noise = sum(1 for v in assignment.values() if v == -1)
     print(f"Clustered {len(assignment)} tiles into {n_clusters} clusters ({n_noise} unclustered/noise)")
@@ -285,7 +287,7 @@ def cmd_run_aoi(args):
 
     report = onboard_aoi(args.aoi_name, args.source_folder, sensor=args.sensor)
     print_onboard_report(report)
-    assignment = cluster_all_tiles(min_cluster_size=args.min_cluster_size)
+    assignment = cluster_all_tiles(min_cluster_size=args.min_cluster_size, fallback_k=args.fallback_k)
     n_clusters = len(set(assignment.values()) - {-1})
     promoted_ids = run_change_detection_for_all_tiles(threshold=args.threshold)
     print(f"\nClusters: {n_clusters} | promoted change candidates: {len(promoted_ids)}")
@@ -549,6 +551,7 @@ def main():
 
     p = sub.add_parser("cluster", help="Run discovery clustering over all indexed tiles")
     p.add_argument("--min-cluster-size", dest="min_cluster_size", type=int, default=3)
+    p.add_argument("--fallback-k", dest="fallback_k", type=int, default=DISCOVERY_FALLBACK_K)
     p.set_defaults(func=cmd_cluster)
 
     p = sub.add_parser("search-text", help="Semantic text search")
@@ -596,6 +599,7 @@ def main():
     p = sub.add_parser("run-pipeline", help="Run validation, onboarding, detection, enrichment, calibration, priority, and clustering")
     p.add_argument("--threshold", type=float, default=0.22)
     p.add_argument("--min-cluster-size", dest="min_cluster_size", type=int, default=3)
+    p.add_argument("--fallback-k", dest="fallback_k", type=int, default=DISCOVERY_FALLBACK_K)
     p.set_defaults(func=cmd_run_pipeline)
 
     p = sub.add_parser("run-aoi", help="Onboard an AOI, cluster tiles, detect changes, and print stats")
@@ -604,6 +608,7 @@ def main():
     p.add_argument("--sensor", default="SENTINEL2_L2A")
     p.add_argument("--threshold", type=float, default=0.22)
     p.add_argument("--min-cluster-size", dest="min_cluster_size", type=int, default=3)
+    p.add_argument("--fallback-k", dest="fallback_k", type=int, default=DISCOVERY_FALLBACK_K)
     p.set_defaults(func=cmd_run_aoi)
 
     p = sub.add_parser("inspect-zip", help="Debug: show every file + parsed JSON inside one Copernicus zip")
