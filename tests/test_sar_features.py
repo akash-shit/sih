@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from rasterio.transform import from_origin
 from app.geospatial.sar_features import (
     compute_sar_features, find_matching_sar_pair, sar_change_score, SarFeatures,
+    is_supported_sar_source,
 )
 from app.geospatial import catalog_db
 from app.cli import cmd_ingest_sar
@@ -47,3 +48,12 @@ def test_synthetic_raster_registration_and_fusion(tmp_path, monkeypatch):
     )
     assert pair is not None
     assert sar_change_score(*pair) > 0
+
+
+def test_sar_source_filter_rejects_raw_and_ratio_products():
+    assert is_supported_sar_source("S1A_IW_VV.tif")
+    assert is_supported_sar_source("S1A_IW_VH.tif")
+    assert not is_supported_sar_source("S1A_IW_RGB_Ratio.tif")
+    assert not is_supported_sar_source("S1A_IW_VV_(Raw).tif")
+    assert not is_supported_sar_source("S1A_IW_VH_(Raw).tif")
+    assert not is_supported_sar_source("SAR_Urban.tif")

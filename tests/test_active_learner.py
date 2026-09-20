@@ -25,3 +25,18 @@ def test_active_learner_uses_trained_model(monkeypatch, tmp_path):
     assert {item.candidate_id for item in ranked} == {1, 2}
     assert all(item.predicted_confirm_prob is not None for item in ranked)
     assert ranked[0].candidate_id == 2
+
+
+def test_active_learner_uses_cached_model(monkeypatch, tmp_path):
+    model_path = tmp_path / "active_learner.pkl"
+    model = LogisticRegression(random_state=0, max_iter=1000)
+    model.fit([[0.1, 0.2, 0.0, 0.0, 0.4, 0.0], [0.9, 0.8, 0.0, 0.0, 0.8, 1.0]], [0, 1])
+    model_path.write_bytes(pickle.dumps(model))
+
+    monkeypatch.setattr(queue, "LEARNER_PATH", model_path)
+    monkeypatch.setattr(queue, "_load_learner_model", lambda: model)
+
+    first = queue._load_learner_model()
+    second = queue._load_learner_model()
+
+    assert first is second

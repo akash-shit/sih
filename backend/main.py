@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app.config import TILE_SIZE_PX
+from app.config import OLLAMA_HOST, OLLAMA_MODEL, TILE_SIZE_PX
 from app.change import storyline, temporal_signature
 from app.change import adaptive, brief, heatmap, sar
 from app.discovery import clustering
@@ -29,6 +29,7 @@ from app.index.vector_index import VectorIndex
 from app.pipeline import onboard_aoi as onboarding
 from app.review import queue as review_queue
 from app.geospatial.rendering import has_valid_multispectral_data
+from app.geospatial.sar_features import find_matching_sar_pair
 from .rendering import difference_image, mosaic_thumbnail, tile_thumbnail
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -108,6 +109,15 @@ class Stats(BaseModel):
 	candidates_promoted: int
 	candidates_confirmed: int
 	candidates_suppressed: int
+	discovery_clusters: int
+	accelerating_tiles: int
+	sar_supported_candidates: int
+	sar_status: str
+	learner_status: str
+	learner_examples: int
+	llm_available: bool
+	llm_model_pulled: bool
+	llm_model: str
 	processing_version: str | None
 	last_run: str | None
 
@@ -172,6 +182,32 @@ class TileDetail(BaseModel):
 	cluster_id: int | None
 	processing_version: str | None
 	thumbnail_url: str | None
+
+
+class TemporalFrame(BaseModel):
+	date: str
+	sensor: str | None = None
+	image_url: str | None = None
+	thumbnail_url: str | None = None
+	stage: str | None = None
+	score: float | None = None
+	score_source: str | None = None
+	quality: str | None = None
+	selected: bool = False
+	asset_tile_id: str | None = None
+	asset_aoi_id: str | None = None
+	location: str | None = None
+
+
+class TemporalEvolution(BaseModel):
+	tile_id: str
+	aoi_id: str | None = None
+	location: str | None = None
+	trend: str | None = None
+	velocity: float | None = None
+	acceleration: float | None = None
+	storyline: str | None = None
+	frames: list[TemporalFrame]
 
 
 class SearchResult(BaseModel):
@@ -280,6 +316,7 @@ class ChangeDetail(ChangeCandidate):
 	acquisition_date_source: str | None
 	processing_version: str | None
 	evidence: ChangeEvidence
+	sar_evidence: dict | None = None
 
 
 class ReviewResponse(BaseModel):
@@ -513,6 +550,10 @@ def stats():
 	with db.get_conn() as conn:
 		counts = {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("aois", "scenes", "tiles", "change_candidates")}
 		last_run = conn.execute("SELECT MAX(ingested_at) FROM scenes").fetchone()[0]
+		discovery_clusters = conn.execute("SELECT COUNT(DISTINCT cluster_id) FROM tiles WHERE cluster_id IS NOT NULL AND cluster_id != -1").fetchone()[0]
+		accelerating_tiles = conn.execute("SELECT COUNT(*) FROM tiles WHERE velocity_trend='accelerating'").fetchone()[0]
+		sar_supported_candidates = conn.execute("SELECT COUNT(*) FROM change_candidates WHERE sar_score IS NOT NULL").fetchone()[0]
+		registered_sar = conn.execute("SELECT COUNT(*) FROM sar_tiles").fetchone()[0]
 		confirmed = conn.execute("""SELECT COUNT(*) FROM change_candidates cc WHERE EXISTS
 			(SELECT 1 FROM audit_log al WHERE al.candidate_id=cc.candidate_id AND al.analyst_decision='confirm'
 			 AND al.log_id=(SELECT MAX(log_id) FROM audit_log WHERE candidate_id=cc.candidate_id))""").fetchone()[0]
@@ -520,9 +561,27 @@ def stats():
 		vector_count = VectorIndex().ntotal
 	except Exception:
 		vector_count = 0
+	try:
+		llm_response = requests.get(f"{OLLAMA_HOST.rstrip('/')}/api/tags", timeout=2)
+		llm_available = llm_response.ok
+		models = (llm_response.json() or {}).get("models", []) if llm_available else []
+		llm_model_pulled = any(
+			isinstance(model, dict) and (model.get("name") == OLLAMA_MODEL or model.get("model") == OLLAMA_MODEL)
+			for model in models
+		)
+	except (requests.RequestException, ValueError, TypeError):
+		llm_available = False
+		llm_model_pulled = False
+	learner = review_queue.learner_status()
+	sar_status = "CALIBRATED" if sar_supported_candidates else ("PARTIAL" if registered_sar else "UNAVAILABLE")
 	return {"aoi_count": counts["aois"], "scene_count": counts["scenes"], "tile_count": counts["tiles"], "vector_count": vector_count,
 			"candidates_scored": counts["change_candidates"], "candidates_promoted": _count_unsuppressed(),
-			"candidates_confirmed": confirmed, "candidates_suppressed": _count_suppressed(), "processing_version": db.PROCESSING_VERSION, "last_run": last_run}
+			"candidates_confirmed": confirmed, "candidates_suppressed": _count_suppressed(),
+			"discovery_clusters": discovery_clusters, "accelerating_tiles": accelerating_tiles,
+			"sar_supported_candidates": sar_supported_candidates, "sar_status": sar_status,
+			"learner_status": "TRAINED" if learner["trained"] else "COLD START", "learner_examples": learner["n_examples"],
+			"llm_available": llm_available, "llm_model_pulled": llm_model_pulled, "llm_model": OLLAMA_MODEL,
+			"processing_version": db.PROCESSING_VERSION, "last_run": last_run}
 
 
 def _count_suppressed() -> int:
@@ -675,19 +734,21 @@ def tile(tile_id: str, request: Request):
 
 
 @app.get("/changes/velocity")
-def change_velocity():
+def change_velocity(limit: int = Query(8, ge=1, le=48), offset: int = Query(0, ge=0), include_series: bool = Query(True)):
 	results = temporal_signature.velocity_for_all_tiles()
 	trend_order = {"accelerating": 0, "steady_change": 1, "decelerating": 2, "stable": 3}
+	ordered = sorted(results.items(), key=lambda item: trend_order.get(item[1].trend, 4))
+	page = ordered[offset:offset + limit]
 	return [
 		{
 			"tile_id": tile_id,
 			"trend": result.trend,
 			"latest_velocity": result.latest_velocity,
 			"acceleration": result.acceleration,
-			"series": result.series,
+			"series": result.series[:6] if include_series else [],
 			"velocities": result.velocities,
 		}
-		for tile_id, result in sorted(results.items(), key=lambda item: trend_order.get(item[1].trend, 4))
+		for tile_id, result in page
 	]
 
 
@@ -703,6 +764,54 @@ def temporal_signature_detail(tile_id: str):
 		"acceleration": result.acceleration,
 		"trend": result.trend,
 		"latest_velocity": result.latest_velocity,
+	}
+
+
+@app.get("/tiles/{tile_id}/temporal-evolution")
+def temporal_evolution(tile_id: str, request: Request):
+	history = db.get_tile_history(tile_id)
+	if not history:
+		raise HTTPException(404, "Tile not found")
+	velocity = temporal_signature.compute_velocity(tile_id)
+	profile = temporal_signature.temporal_profile(tile_id)
+	frames = []
+	score_sources = getattr(velocity, "score_sources", ["combined"] * max(1, len(velocity.velocities or [0])))
+	for idx, selected in enumerate(temporal_signature.select_temporal_keyframes(history)):
+		stage = temporal_signature._stage_label(idx, min(5, len(history)))
+		aoi = db.get_aoi(selected.get("aoi_id")) if selected.get("aoi_id") is not None else None
+		date_value = selected.get("date") or selected.get("acquisition_date")
+		path = selected.get("tile_path")
+		vector_id = selected.get("vector_id")
+		thumb = None
+		if path and vector_id is not None and Path(path).exists():
+			thumb = public_url(request, tile_thumbnail(path, GENERATED_DIR / "thumbnails", int(vector_id)))
+		quality = "ok"
+		if selected.get("cloud_fraction") is not None and float(selected.get("cloud_fraction", 0)) > 0.25:
+			quality = "cloud-degraded"
+		frame = {
+			"date": date_value,
+			"sensor": selected.get("sensor") or "SENTINEL2",
+			"image_url": thumb,
+			"thumbnail_url": thumb,
+			"stage": stage,
+			"score": float(velocity.velocities[min(idx, len(velocity.velocities) - 1)]) if velocity.velocities else None,
+			"score_source": score_sources[min(idx, len(score_sources) - 1)] if score_sources else "combined",
+			"quality": quality,
+			"selected": idx == max(0, min(len(history) - 1, len(history) // 2)),
+			"asset_tile_id": selected.get("tile_id"),
+			"asset_aoi_id": aoi["name"] if aoi else selected.get("aoi_id"),
+			"location": aoi["name"] if aoi else None,
+		}
+		frames.append(frame)
+	return {
+		"tile_id": tile_id,
+		"aoi_id": history[0]["aoi_id"] if history and history[0]["aoi_id"] is not None else None,
+		"location": db.get_aoi(history[0]["aoi_id"])['name'] if history and history[0]["aoi_id"] is not None and db.get_aoi(history[0]["aoi_id"]) else None,
+		"trend": velocity.trend,
+		"velocity": velocity.latest_velocity,
+		"acceleration": velocity.acceleration,
+		"storyline": storyline.classify_stage(velocity.velocities, profile) if velocity.velocities else None,
+		"frames": frames,
 	}
 
 
@@ -800,7 +909,7 @@ async def image_search(request: Request, file: Annotated[UploadFile, File(...)],
 @app.get("/changes/candidates", response_model=list[ChangeCandidate])
 def candidates(request: Request, status: str | None = None, aoi_id: str | None = None,
 			   sort: str = Query("combined_score"), min_priority: float | None = Query(None, ge=0, le=1),
-			   modality: str | None = None, limit: int = Query(24, ge=1, le=100)):
+			   modality: str | None = None, limit: int = Query(24, ge=1, le=100), offset: int = Query(0, ge=0)):
 	decisions = latest_decisions()
 	with db.get_conn() as conn:
 		join = " JOIN tiles t ON t.tile_id = cc.tile_id AND t.vector_id = cc.vector_id_after" if aoi_id else ""
@@ -812,16 +921,31 @@ def candidates(request: Request, status: str | None = None, aoi_id: str | None =
 		if modality:
 			clauses.append("cc.modality = ?")
 			params += (modality,)
+		if status and status.upper() == "SUPPRESSED":
+			clauses.append("cc.suppressed = 1")
+		elif status:
+			clauses.append("cc.suppressed = 0")
 		where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
 		order_column = {"priority": "COALESCE(cc.priority_score, 0)", "learned": "COALESCE(cc.predicted_confirm_prob, 0)", "combined_score": "cc.combined_score"}.get(sort, "cc.combined_score")
-		limit_clause = " LIMIT ?" if not status else ""
-		params += (limit,) if not status else ()
-		rows = conn.execute(
-			f"SELECT cc.* FROM change_candidates cc{join}{where} ORDER BY {order_column} DESC{limit_clause}",
-			params,
-		).fetchall()
-	items = [item for row in rows if not status or candidate_status(row, decisions) == status.upper() for item in [candidate_public(row, request, decisions)]]
-	return items[:limit]
+		# Status is derived from suppression and the latest review decision, so
+		# filter it before pagination or SUPPRESSED pages can never be filled.
+		if status:
+			rows = [
+				row for row in conn.execute(
+					f"SELECT cc.* FROM change_candidates cc{join}{where} ORDER BY {order_column} DESC",
+					params,
+				).fetchall()
+				if candidate_status(row, decisions) == status.upper()
+			]
+			rows = rows[offset:offset + limit]
+		else:
+			params += (limit, offset)
+			rows = conn.execute(
+				f"SELECT cc.* FROM change_candidates cc{join}{where} ORDER BY {order_column} DESC LIMIT ? OFFSET ?",
+				params,
+			).fetchall()
+	items = [candidate_public(row, request, decisions) for row in rows]
+	return items
 
 
 @app.post("/changes/recompute-priority")
@@ -932,6 +1056,23 @@ def change(vector_id: int, request: Request):
 	if before["ndvi_mean"] is not None and after["ndvi_mean"] is not None:
 		ndvi_change = after["ndvi_mean"] - before["ndvi_mean"]
 	quality_notes = _quality_notes(before, after)
+	sar_evidence = None
+	sar_pair = find_matching_sar_pair(before, after) if before and after else None
+	if sar_pair:
+		with db.get_conn() as conn:
+			sar_rows = conn.execute("SELECT * FROM sar_tiles WHERE tile_id=? ORDER BY acquisition_datetime", (row["tile_id"],)).fetchall()
+			sar_evidence = {
+				"sensor": "Sentinel-1",
+				"product_type": "GRD",
+				"backscatter_coefficient": "gamma0",
+				"before": {"vv_db": sar_pair[0].vv_mean_db, "vh_db": sar_pair[0].vh_mean_db, "vv_minus_vh_db": sar_pair[0].vv_minus_vh_db, "valid_fraction": sar_pair[0].valid_pixels},
+				"after": {"vv_db": sar_pair[1].vv_mean_db, "vh_db": sar_pair[1].vh_mean_db, "vv_minus_vh_db": sar_pair[1].vv_minus_vh_db, "valid_fraction": sar_pair[1].valid_pixels},
+				"sar_score": row["sar_score"],
+				"fusion_mode": row["modality"],
+				"sar_quality": "sufficient" if all(item.valid_pixels >= 0.50 for item in sar_pair) else "insufficient",
+				"temporal_match": True,
+				"observations": [{"acquisition_datetime": item["acquisition_datetime"], "period_start": item["period_start"], "period_end": item["period_end"], "processing_version": item["processing_version"]} for item in sar_rows],
+			}
 	source_unavailable = not result["before_source_available"] or not result["after_source_available"]
 	if source_unavailable:
 		visual_summary = "Source imagery for the BEFORE or AFTER observation is unavailable or invalid, so a visual before/after comparison cannot be established."
@@ -949,7 +1090,7 @@ def change(vector_id: int, request: Request):
 				   "lat": (after["minlat"] + after["maxlat"]) / 2, "lon": (after["minlon"] + after["maxlon"]) / 2,
 				   "bbox": tile_bbox(after), "ndvi_series": [{"date": item["acquisition_date"], "ndvi_mean": item["ndvi_mean"], "ndwi_mean": item["ndwi_mean"], "cloud_fraction": item["cloud_fraction"]} for item in history],
 																		 "quality_notes": quality_notes,
-				   "acquisition_date_source": scene_source(after["scene_path"]), "processing_version": after["processing_version"]})
+																	 "acquisition_date_source": scene_source(after["scene_path"]), "processing_version": after["processing_version"], "sar_evidence": sar_evidence})
 	from app.change.narrative import build_narrative
 	narrative = build_narrative(
 		before_date=row["date_before"], after_date=row["date_after"], change_region=change_region,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import median
+from time import monotonic
 
 from app.change.detector import analyze_tile_pair, analyze_tile_timeline
 from app.geospatial import catalog_db as db
@@ -36,6 +37,10 @@ class VelocityResult:
     series: list[dict]
 
 
+_VELOCITY_CACHE: tuple[float, dict[str, VelocityResult]] | None = None
+_VELOCITY_CACHE_TTL = 20.0
+
+
 def _coerce_date(value):
     """Normalize iso-like date strings into datetime objects."""
     if value is None:
@@ -50,6 +55,20 @@ def _coerce_date(value):
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+    return None
+
+
+def _frame_date(observation) -> str | None:
+    if isinstance(observation, dict):
+        candidates = [observation.get("date"), observation.get("acquisition_date"), observation.get("date_after"), observation.get("date_before")]
+    else:
+        candidates = [getattr(observation, "date", None), getattr(observation, "acquisition_date", None), getattr(observation, "date_after", None), getattr(observation, "date_before", None)]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        dt = _coerce_date(candidate)
+        if dt is not None:
+            return dt.date().isoformat()
     return None
 
 
@@ -93,6 +112,94 @@ def _midpoint_for_candidate(candidate):
     if before is None or after is None:
         return None
     return before + (after - before) / 2
+
+
+def _observation_date(observation) -> datetime | None:
+    if isinstance(observation, dict):
+        if "acquisition_date" in observation:
+            return _coerce_date(observation["acquisition_date"])
+        if "date" in observation:
+            return _coerce_date(observation["date"])
+        if "date_after" in observation:
+            return _coerce_date(observation["date_after"])
+        if "date_before" in observation:
+            return _coerce_date(observation["date_before"])
+    return _coerce_date(getattr(observation, "acquisition_date", None) or getattr(observation, "date", None) or getattr(observation, "date_after", None) or getattr(observation, "date_before", None))
+
+
+def _stage_label(index: int, count: int) -> str:
+    if count == 1:
+        return "CURRENT"
+    if count == 2:
+        return ["BEFORE", "CURRENT"][index]
+    if count == 3:
+        return ["BEFORE", "INTERMEDIATE", "CURRENT"][index]
+    if count == 4:
+        return ["BEFORE", "EARLY", "DEVELOPING", "CURRENT"][index]
+    return ["BEFORE", "EARLY", "DEVELOPING", "LATE", "CURRENT"][index]
+
+
+def select_temporal_keyframes(observations, pairwise_change_scores=None, velocity_series=None, image_paths=None):
+    """Return a deterministic 1-5 frame selection from the real observation history.
+
+    The selection keeps the extremal coverage points and the strongest transition
+    when enough observations exist, without inventing data or duplicate dates.
+    """
+    ordered = list(observations or [])
+    if not ordered:
+        return []
+
+    def normalize(item):
+        if isinstance(item, dict):
+            normalized = dict(item)
+        else:
+            normalized = {}
+            for key in ("date", "acquisition_date", "date_before", "date_after", "tile_path", "sensor", "vector_id", "tile_id", "aoi_id", "cloud_fraction"):
+                value = getattr(item, key, None)
+                if value is not None:
+                    normalized[key] = value
+        normalized.setdefault("date", _frame_date(item))
+        normalized.setdefault("acquisition_date", normalized.get("date"))
+        return normalized
+
+    normalized = [normalize(item) for item in ordered]
+    if len(normalized) <= 5:
+        selected = normalized
+    else:
+        metrics = [0.0] * len(normalized)
+        if pairwise_change_scores:
+            metrics = [abs(float(value)) for value in pairwise_change_scores[: len(normalized)]]
+        elif velocity_series:
+            metrics = [abs(float(value)) for value in velocity_series[: len(normalized)]]
+        peak_index = max(range(len(normalized)), key=lambda idx: metrics[idx]) if metrics else 0
+        indices = {0, len(normalized) - 1, peak_index}
+        if len(normalized) >= 4:
+            indices.add(len(normalized) // 3)
+            indices.add((2 * len(normalized)) // 3)
+        elif len(normalized) == 3:
+            indices.add(1)
+        selected = [normalized[idx] for idx in sorted(indices)]
+        if len(selected) > 5:
+            selected = [normalized[idx] for idx in sorted(set(indices) | {len(normalized) // 2})][:5]
+
+    unique: list[dict] = []
+    seen: set[str] = set()
+    for item in selected:
+        key = item.get("date") or item.get("acquisition_date") or repr(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    if len(unique) < min(5, len(normalized)):
+        for item in normalized:
+            key = item.get("date") or item.get("acquisition_date") or repr(item)
+            if key in seen:
+                continue
+            unique.append(item)
+            seen.add(key)
+            if len(unique) >= min(5, len(normalized)):
+                break
+    return unique[: min(5, len(normalized))]
 
 
 def compute_velocity(tile_id: str) -> VelocityResult:
@@ -227,5 +334,11 @@ def temporal_profile(tile_id: str) -> dict:
 
 
 def velocity_for_all_tiles() -> dict[str, VelocityResult]:
+    global _VELOCITY_CACHE
+    now = monotonic()
+    if _VELOCITY_CACHE and now - _VELOCITY_CACHE[0] < _VELOCITY_CACHE_TTL:
+        return _VELOCITY_CACHE[1]
     tiles = db.get_all_tile_ids()
-    return {tile_id: compute_velocity(tile_id) for tile_id in tiles}
+    results = {tile_id: compute_velocity(tile_id) for tile_id in tiles}
+    _VELOCITY_CACHE = (now, results)
+    return results

@@ -42,6 +42,7 @@ from app.geospatial.scene_stack import assemble_prepared_stacks
 from app.pipeline.batch_validate import ScannedScene, validate_batch, ValidationReport
 from app.pipeline.ingest import ingest_scene
 from app.config import validate_remoteclip_config
+from app.geospatial.sar_features import is_supported_sar_source
 
 log = logging.getLogger("onboard_aoi")
 
@@ -153,7 +154,7 @@ def _sar_pairs(source_folder: Path, staging_dir: Path) -> list[tuple[str, Path |
     groups: dict[str, dict[str, Path]] = {}
     for path in files:
         name = path.name.lower()
-        if "ratio" in name or "rgb" in name:
+        if not is_supported_sar_source(name):
             yield (str(path), None)
             continue
         polarization = "vv" if "_vv_" in name or name.endswith("_vv.tif") or name.endswith("_vv.tiff") else "vh" if "_vh_" in name or name.endswith("_vh.tif") or name.endswith("_vh.tiff") else None
@@ -189,7 +190,17 @@ def _sar_pairs(source_folder: Path, staging_dir: Path) -> list[tuple[str, Path |
             with rasterio.open(stacked, "w", **profile) as destination:
                 destination.write(vv_source.read(1), 1)
                 destination.write(vh_source.read(1), 2)
-                destination.update_tags(PRODUCT_TYPE="GRD")
+                destination.update_tags(
+                    PRODUCT_TYPE="GRD",
+                    SENSOR="SENTINEL-1",
+                    PRODUCT_ID=vv_source.tags().get("PRODUCT_ID", ""),
+                    POLARIZATION="VV,VH",
+                    BACKSCATTER_COEFFICIENT="gamma0",
+                    BACKSCATTER_DOMAIN="linear_power",
+                    UNITS="linear_power",
+                    ACQUISITION_DATETIME=vv_source.tags().get("ACQUISITION_DATETIME", ""),
+                    SOURCE_PROVENANCE="Planetary Computer sentinel-1-rtc gamma0 COG subset",
+                )
         yield (f"{pair['vv']} | {pair['vh']}", stacked)
 
 
@@ -223,7 +234,7 @@ def _sar_tile_id(path: Path, aoi_id: int, known_tile_ids: set[str]) -> str | Non
 
 def onboard_aoi_sar(aoi_name: str, sar_folder: str) -> SarOnboardReport:
     """Attach real Sentinel-1 rasters to the existing optical tile grid."""
-    from app.geospatial.sar_features import compute_sar_features
+    from app.geospatial.sar_features import compute_sar_features, is_supported_sar_source
 
     source_folder = Path(sar_folder)
     if not source_folder.exists():

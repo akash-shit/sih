@@ -3,7 +3,12 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from app.change.temporal_signature import _effective_score, compute_velocity, temporal_profile
+from app.change.temporal_signature import (
+    _effective_score,
+    compute_velocity,
+    select_temporal_keyframes,
+    temporal_profile,
+)
 from backend.main import app
 
 
@@ -124,3 +129,59 @@ def test_change_velocity_contract_exposes_series(monkeypatch):
     assert payload[0]["series"][0]["date_pair"]["before"] == "2025-01-01"
     assert payload[0]["series"][0]["velocity"] == 0.1
     assert payload[0]["series"][0]["source"] == "combined"
+
+
+def test_change_velocity_supports_page_limits_and_offset(monkeypatch):
+    client = TestClient(app)
+    fake_results = {
+        "T1": SimpleNamespace(trend="stable", latest_velocity=0.1, acceleration=0.0, series=[{"date_pair": {"before": "2025-01-01", "after": "2025-01-15"}, "velocity": 0.1, "source": "combined"}], velocities=[0.1]),
+        "T2": SimpleNamespace(trend="accelerating", latest_velocity=0.2, acceleration=0.1, series=[{"date_pair": {"before": "2025-01-01", "after": "2025-01-15"}, "velocity": 0.2, "source": "combined"}], velocities=[0.2]),
+        "T3": SimpleNamespace(trend="steady_change", latest_velocity=0.3, acceleration=0.2, series=[{"date_pair": {"before": "2025-01-01", "after": "2025-01-15"}, "velocity": 0.3, "source": "combined"}], velocities=[0.3]),
+    }
+    monkeypatch.setattr("backend.main.temporal_signature.velocity_for_all_tiles", lambda: fake_results)
+
+    response = client.get("/changes/velocity", params={"limit": 2, "offset": 1})
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 2
+    assert [item["tile_id"] for item in payload] == ["T3", "T1"]
+
+
+def test_select_temporal_keyframes_prefers_earliest_peak_latest_and_keeps_determinism():
+    history = [
+        {"vector_id": 1, "acquisition_date": "2020-01-01", "tile_path": "/tmp/1.tif", "sensor": "SENTINEL2"},
+        {"vector_id": 2, "acquisition_date": "2020-04-01", "tile_path": "/tmp/2.tif", "sensor": "SENTINEL2"},
+        {"vector_id": 3, "acquisition_date": "2021-01-01", "tile_path": "/tmp/3.tif", "sensor": "SENTINEL2"},
+        {"vector_id": 4, "acquisition_date": "2022-01-01", "tile_path": "/tmp/4.tif", "sensor": "SENTINEL2"},
+        {"vector_id": 5, "acquisition_date": "2024-01-01", "tile_path": "/tmp/5.tif", "sensor": "SENTINEL2"},
+    ]
+    frames = select_temporal_keyframes(history)
+    assert [frame["date"] for frame in frames] == [
+        "2020-01-01",
+        "2020-04-01",
+        "2021-01-01",
+        "2022-01-01",
+        "2024-01-01",
+    ]
+    assert len(frames) == 5
+
+
+def test_temporal_evolution_endpoint_uses_real_tile_frames(monkeypatch):
+    client = TestClient(app)
+    history = [
+        {"vector_id": 10, "tile_id": "T9", "aoi_id": 1, "acquisition_date": "2020-01-01", "tile_path": "/tmp/a.tif", "sensor": "SENTINEL2", "cloud_fraction": 0.01, "minlat": 0.0, "maxlat": 1.0, "minlon": 0.0, "maxlon": 1.0},
+        {"vector_id": 11, "tile_id": "T9", "aoi_id": 1, "acquisition_date": "2021-01-01", "tile_path": "/tmp/b.tif", "sensor": "SENTINEL2", "cloud_fraction": 0.02, "minlat": 0.0, "maxlat": 1.0, "minlon": 0.0, "maxlon": 1.0},
+        {"vector_id": 12, "tile_id": "T9", "aoi_id": 1, "acquisition_date": "2023-01-01", "tile_path": "/tmp/c.tif", "sensor": "SENTINEL2", "cloud_fraction": 0.03, "minlat": 0.0, "maxlat": 1.0, "minlon": 0.0, "maxlon": 1.0},
+    ]
+    monkeypatch.setattr("backend.main.db.get_tile_history", lambda tile_id: history)
+    monkeypatch.setattr("backend.main.temporal_signature.compute_velocity", lambda tile_id: SimpleNamespace(velocities=[0.1, 0.2, 0.4], trend="accelerating", acceleration=0.2, latest_velocity=0.4, series=[{"date_pair": {"before": "2020-01-01", "after": "2021-01-01"}, "velocity": 0.2, "source": "combined"}, {"date_pair": {"before": "2021-01-01", "after": "2023-01-01"}, "velocity": 0.4, "source": "combined"}]))
+    monkeypatch.setattr("backend.main.public_url", lambda request, path: "/generated/test.png")
+    monkeypatch.setattr("backend.main.tile_thumbnail", lambda *args, **kwargs: Path("/tmp/test.png"))
+
+    response = client.get("/tiles/T9/temporal-evolution")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tile_id"] == "T9"
+    assert len(payload["frames"]) >= 2
+    assert payload["frames"][0]["date"] == "2020-01-01"
+    assert payload["frames"][0]["stage"]

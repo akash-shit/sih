@@ -28,6 +28,20 @@ from app.geospatial import catalog_db as db
 logger = logging.getLogger(__name__)
 
 
+def is_supported_sar_source(path_or_name: str) -> bool:
+    """Accept only Calibration-quality VV/VH sources and reject raw/ratio/visual products."""
+    name = str(path_or_name).lower()
+    if not name:
+        return False
+    if any(token in name for token in ("rgb", "ratio", "false_color", "urban", "sar_urban", "_raw", "raw.", "raw_")):
+        return False
+    if any(token in name for token in ("vv", "vh")):
+        if any(token in name for token in ("_vv_", "_vh_", "vv.tif", "vh.tif", "vv.tiff", "vh.tiff")):
+            if "ratio" not in name and "rgb" not in name and "raw" not in name and "urban" not in name:
+                return True
+    return False
+
+
 @dataclass(frozen=True)
 class SarFeatures:
     vv_mean_db: float | None

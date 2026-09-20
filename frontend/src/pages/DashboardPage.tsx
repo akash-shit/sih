@@ -170,6 +170,26 @@ export const DashboardPage: React.FC = () => {
 
       {/* Section 3: Engine Architecture & Pipeline Health Panel */}
       <GlassPanel className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-text-primary">Live System State</h2>
+            <p className="text-xs text-text-secondary mt-1">Measured from the active catalog and local services</p>
+          </div>
+          <Activity size={18} className="text-aurora-400" />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4 font-mono text-xs">
+          <div><span className="text-[10px] uppercase text-text-muted block">Clusters</span><span className="text-text-primary font-semibold">{stats?.discovery_clusters ?? '—'}</span></div>
+          <div><span className="text-[10px] uppercase text-text-muted block">Accelerating</span><span className="text-text-primary font-semibold">{stats?.accelerating_tiles ?? '—'}</span></div>
+          <div><span className="text-[10px] uppercase text-text-muted block">SAR Candidates</span><span className="text-text-primary font-semibold">{stats?.sar_supported_candidates ?? '—'}</span></div>
+          <div><span className="text-[10px] uppercase text-text-muted block">SAR Status</span><span className="text-text-primary font-semibold">{stats?.sar_status ?? '—'}</span></div>
+          <div><span className="text-[10px] uppercase text-text-muted block">Learner</span><span className="text-text-primary font-semibold">{stats?.learner_status ?? '—'}</span></div>
+          <div><span className="text-[10px] uppercase text-text-muted block">LLM</span><span className="text-text-primary font-semibold">{stats?.llm_available && stats?.llm_model_pulled ? 'AVAILABLE' : 'OFFLINE'}</span></div>
+          <div><span className="text-[10px] uppercase text-text-muted block">Model</span><span className="text-text-primary font-semibold truncate">{stats?.llm_model ?? '—'}</span></div>
+        </div>
+      </GlassPanel>
+
+      {/* Section 3: Engine Architecture & Pipeline Health Panel */}
+      <GlassPanel className="p-6">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="flex items-start gap-4">
             <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-aurora-400">

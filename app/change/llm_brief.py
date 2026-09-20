@@ -18,10 +18,22 @@ def _safelist_numbers(candidate_facts: dict) -> set[str]:
     return set(re.findall(r"-?\d+(?:\.\d+)?", json.dumps(candidate_facts, default=str)))
 
 
+def _is_grounded_brief(text: str, candidate_facts: dict) -> bool:
+    allowed = _safelist_numbers(candidate_facts)
+    if any(number not in allowed for number in re.findall(r"-?\d+(?:\.\d+)?", text)):
+        return False
+    lowered = text.lower()
+    forbidden = ("market", "company", "financial", "investor", "economic", "accuracy", "model's performance")
+    if any(term in lowered for term in forbidden):
+        return False
+    known_terms = [str(candidate_facts.get(key, "")).replace("_", " ").lower() for key in ("change_type", "modality")]
+    return any(term and term in lowered for term in known_terms)
+
+
 def _generate_with_ollama(prompt: str) -> str | None:
     response = requests.post(
         f"{OLLAMA_HOST.rstrip('/')}/api/generate",
-        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0, "seed": 0}},
         timeout=7,
     )
     response.raise_for_status()
@@ -68,9 +80,34 @@ def generate_llm_brief(candidate_facts: dict) -> str | None:
             text = _generate_with_ollama(prompt)
         if not isinstance(text, str) or not text.strip():
             return None
-        allowed = _safelist_numbers(candidate_facts)
-        if any(number not in allowed for number in re.findall(r"-?\d+(?:\.\d+)?", text)):
-            return None
+        if not _is_grounded_brief(text, candidate_facts):
+            strict_prompt = (
+                "Write one short, cautious analyst brief using only the supplied facts. "
+                "Do not include any digits, dates, percentages, scores, coordinates, or other numbers. "
+                "Do not mention models, markets, or facts not present in the input. "
+                "Use qualitative language and state that this is a candidate interpretation.\n"
+                f"FACTS:\n{json.dumps(candidate_facts, sort_keys=True, default=str)}"
+            )
+            text = None
+            for _ in range(3):
+                if LLM_BACKEND == "llama_cpp":
+                    text = _generate_with_llama_cpp(strict_prompt)
+                else:
+                    text = _generate_with_ollama(strict_prompt)
+                if isinstance(text, str) and text.strip() and _is_grounded_brief(text, candidate_facts):
+                    break
+            if not isinstance(text, str) or not text.strip() or not _is_grounded_brief(text, candidate_facts):
+                constrained_prompt = (
+                    "Return exactly one sentence and nothing else. Use this template with no digits: "
+                    "Candidate interpretation: the optical evidence indicates a possible change with no clear category; analyst confirmation is required. "
+                    "Do not add any other claim."
+                )
+                if LLM_BACKEND == "llama_cpp":
+                    text = _generate_with_llama_cpp(constrained_prompt)
+                else:
+                    text = _generate_with_ollama(constrained_prompt)
+            if not isinstance(text, str) or not text.strip() or not _is_grounded_brief(text, candidate_facts):
+                return None
         return text.strip()
     except (requests.RequestException, ValueError, TypeError, KeyError, OSError, RuntimeError):
         return None

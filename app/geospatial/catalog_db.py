@@ -206,6 +206,11 @@ def init_db():
         # executescript() for a database that predates the aois table.
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tiles_aoi ON tiles(aoi_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scenes_aoi ON scenes(aoi_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tiles_aoi_date ON tiles(aoi_id, acquisition_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tiles_cluster ON tiles(cluster_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_candidates_score ON change_candidates(combined_score DESC, candidate_id DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_candidates_priority ON change_candidates(priority_score DESC, candidate_id DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_candidates_predicted ON change_candidates(predicted_confirm_prob DESC, candidate_id DESC)")
 
 
 def register_sar_observation(*, tile_id: str | None, scene_path: str, acquisition_date: str,

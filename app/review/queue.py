@@ -38,6 +38,28 @@ class ReviewItem:
 
 
 LEARNER_PATH = DATA_DIR / "models_learned" / "active_learner.pkl"
+_LEARNER_MODEL_CACHE = None
+_LEARNER_MODEL_PATH = None
+
+
+def _load_learner_model():
+    global _LEARNER_MODEL_CACHE, _LEARNER_MODEL_PATH
+    if _LEARNER_MODEL_CACHE is not None and _LEARNER_MODEL_PATH == LEARNER_PATH:
+        return _LEARNER_MODEL_CACHE
+    if not LEARNER_PATH.exists():
+        _LEARNER_MODEL_CACHE = None
+        _LEARNER_MODEL_PATH = LEARNER_PATH
+        return None
+    try:
+        with LEARNER_PATH.open("rb") as handle:
+            model = pickle.load(handle)
+        _LEARNER_MODEL_CACHE = model
+        _LEARNER_MODEL_PATH = LEARNER_PATH
+        return model
+    except (OSError, pickle.PickleError):
+        _LEARNER_MODEL_CACHE = None
+        _LEARNER_MODEL_PATH = LEARNER_PATH
+        return None
 
 
 def _feature_vector(row):
@@ -59,6 +81,9 @@ def _maybe_retrain_learner():
     with temporary.open("wb") as handle:
         pickle.dump(model, handle)
     os.replace(temporary, LEARNER_PATH)
+    global _LEARNER_MODEL_CACHE, _LEARNER_MODEL_PATH
+    _LEARNER_MODEL_CACHE = model
+    _LEARNER_MODEL_PATH = LEARNER_PATH
     return model
 
 
@@ -73,13 +98,7 @@ def learner_status() -> dict:
 def get_review_queue(limit: int = 50, sort: str = "combined_score") -> list[ReviewItem]:
     rows = db.list_review_queue(include_suppressed=False, limit=limit)
     items = []
-    model = None
-    if sort == "learned" and LEARNER_PATH.exists():
-        try:
-            with LEARNER_PATH.open("rb") as handle:
-                model = pickle.load(handle)
-        except (OSError, pickle.PickleError):
-            model = None
+    model = _load_learner_model() if sort == "learned" else None
     scored = []
     for r in rows:
         before = db.get_tile(r["vector_id_before"])

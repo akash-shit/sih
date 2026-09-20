@@ -44,7 +44,7 @@ export const ReviewQueuePage: React.FC = () => {
     refetch: refetchCandidates,
   } = useChangeCandidates(activeTab === 'audit' ? undefined : activeTab, undefined, sort);
 
-  const { data: auditLogs, isLoading: auditLoading } = useAuditLog();
+  const { data: auditLogs, isLoading: auditLoading } = useAuditLog(activeTab === 'audit');
   const submitDecision = useSubmitDecision();
 
   const [selectedCandidate, setSelectedCandidate] = useState<ChangeCandidate | null>(null);

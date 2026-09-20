@@ -288,6 +288,25 @@ export const ChangeDetailPage: React.FC = () => {
                     <Sparkles size={16} />
                   </div>
                   <div>
+
+                  <GlassPanel className="p-6">
+                    <div className="flex items-center justify-between border-b border-white/[0.06] pb-4">
+                      <h3 className="text-xs font-mono uppercase tracking-wider text-text-secondary">Sentinel-1 Evidence</h3>
+                      <span className="text-[10px] font-mono uppercase text-text-muted">{change.sar_evidence ? change.sar_evidence.sar_quality : 'unavailable'}</span>
+                    </div>
+                    {change.sar_evidence ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 pt-4 text-xs font-mono">
+                        <div><span className="text-[10px] uppercase text-text-muted block">Sensor</span><span>Sentinel-1</span></div>
+                        <div><span className="text-[10px] uppercase text-text-muted block">Product</span><span>{change.sar_evidence.product_type}</span></div>
+                        <div><span className="text-[10px] uppercase text-text-muted block">VV before</span><span>{change.sar_evidence.before.vv_db.toFixed(2)} dB</span></div>
+                        <div><span className="text-[10px] uppercase text-text-muted block">VH before</span><span>{change.sar_evidence.before.vh_db.toFixed(2)} dB</span></div>
+                        <div><span className="text-[10px] uppercase text-text-muted block">VV after</span><span>{change.sar_evidence.after.vv_db.toFixed(2)} dB</span></div>
+                        <div><span className="text-[10px] uppercase text-text-muted block">VH after</span><span>{change.sar_evidence.after.vh_db.toFixed(2)} dB</span></div>
+                        <div><span className="text-[10px] uppercase text-text-muted block">SAR score</span><span>{change.sar_evidence.sar_score?.toFixed(3) ?? '—'}</span></div>
+                        <div><span className="text-[10px] uppercase text-text-muted block">Fusion</span><span>{change.sar_evidence.fusion_mode ?? '—'}</span></div>
+                      </div>
+                    ) : <p className="pt-4 text-xs font-mono text-text-muted">SAR evidence unavailable</p>}
+                  </GlassPanel>
                     <span className="text-[10px] font-mono uppercase text-text-muted block">
                       Zero-Shot CLIP Classification
                     </span>

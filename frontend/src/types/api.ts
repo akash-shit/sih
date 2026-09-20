@@ -17,6 +17,15 @@ export interface Stats {
   candidates_promoted: number;
   candidates_confirmed: number;
   candidates_suppressed: number;
+  discovery_clusters: number;
+  accelerating_tiles: number;
+  sar_supported_candidates: number;
+  sar_status: string;
+  learner_status: string;
+  learner_examples: number;
+  llm_available: boolean;
+  llm_model_pulled: boolean;
+  llm_model: string;
   processing_version: string | null;
   last_run: string | null;
 }
@@ -189,6 +198,18 @@ export interface ChangeDetail extends ChangeCandidate {
   acquisition_date_source: string | null;
   processing_version: string | null;
   evidence: ChangeEvidence;
+  sar_evidence?: {
+    sensor: string;
+    product_type: string;
+    backscatter_coefficient: string;
+    before: { vv_db: number; vh_db: number; vv_minus_vh_db: number; valid_fraction: number };
+    after: { vv_db: number; vh_db: number; vv_minus_vh_db: number; valid_fraction: number };
+    sar_score: number | null;
+    fusion_mode: string | null;
+    sar_quality: string;
+    temporal_match: boolean;
+    observations: Array<{ acquisition_datetime: string | null; period_start: string | null; period_end: string | null; processing_version: string | null }>;
+  } | null;
 }
 
 export interface ReviewDecision {
@@ -261,6 +282,32 @@ export interface VelocityPoint {
   date_pair: { before: string; after: string };
   velocity: number;
   source: string;
+}
+
+export interface TemporalEvolutionFrame {
+  date: string | null;
+  sensor: string | null;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  stage: string | null;
+  score: number | null;
+  score_source: string | null;
+  quality: string | null;
+  selected: boolean;
+  asset_tile_id: string | null;
+  asset_aoi_id: string | null;
+  location: string | null;
+}
+
+export interface TemporalEvolution {
+  tile_id: string;
+  aoi_id: string | null;
+  location: string | null;
+  trend: string | null;
+  velocity: number | null;
+  acceleration: number | null;
+  storyline: string | null;
+  frames: TemporalEvolutionFrame[];
 }
 
 export interface TemporalSignature {
