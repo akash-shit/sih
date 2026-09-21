@@ -1,3 +1,6 @@
+
+
+
 FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /build/frontend
 COPY frontend/package*.json ./
@@ -17,6 +20,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt huggingface_hub
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Akashxo/satelliteintelligence', repo_type='dataset', allow_patterns='processed/**', local_dir='/tmp/hfdata')" \
+    && cp -r /tmp/hfdata/processed/. /app/data/ \
+    && rm -rf /tmp/hfdata
 COPY app/ ./app/
 COPY backend/ ./backend/
 COPY README.md PROJECT_WORKFLOW.md ./
