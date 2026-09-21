@@ -435,7 +435,10 @@ def cmd_run_pipeline(args):
     print(json.dumps(calibration, indent=2))
     print("[8/9] Recomputing candidate priorities and clustering")
     print(f"  priorities updated: {_recompute_priority_direct()}")
-    cmd_cluster(argparse.Namespace(min_cluster_size=args.min_cluster_size))
+    cmd_cluster(argparse.Namespace(
+        min_cluster_size=args.min_cluster_size,
+        fallback_k=args.fallback_k
+    ))
 
     print("[9/9] Final pipeline summary")
     db.init_db()
