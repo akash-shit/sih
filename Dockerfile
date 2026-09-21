@@ -16,11 +16,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgdal-dev gdal-bin libgeos-dev libproj-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt huggingface_hub
 COPY app/ ./app/
 COPY backend/ ./backend/
 COPY README.md PROJECT_WORKFLOW.md ./
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist
 RUN mkdir -p /app/data /app/models
 EXPOSE 8000
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+COPY start.sh ./start.sh
+RUN chmod +x ./start.sh
+CMD ["./start.sh"]
